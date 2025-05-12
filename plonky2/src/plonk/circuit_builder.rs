@@ -22,6 +22,7 @@ use crate::fri::{FriConfig, FriParams};
 use crate::gadgets::arithmetic::BaseArithmeticOperation;
 use crate::gadgets::arithmetic_extension::ExtensionArithmeticOperation;
 use crate::gadgets::polynomial::PolynomialCoeffsExtTarget;
+use crate::gadgets::select::BaseSelectionOperation;
 use crate::gates::arithmetic_base::ArithmeticGate;
 use crate::gates::arithmetic_extension::ArithmeticExtensionGate;
 use crate::gates::constant::ConstantGate;
@@ -173,6 +174,9 @@ pub struct CircuitBuilder<F: RichField + Extendable<D>, const D: usize> {
     /// Memoized results of `arithmetic` calls.
     pub(crate) base_arithmetic_results: HashMap<BaseArithmeticOperation<F>, Target>,
 
+    /// Memoized results of 'select' calls.
+    pub(crate) base_select_results: HashMap<BaseSelectionOperation, Target>,
+
     /// Memoized results of `arithmetic_extension` calls.
     pub(crate) arithmetic_results: HashMap<ExtensionArithmeticOperation<F, D>, ExtensionTarget<D>>,
 
@@ -221,6 +225,7 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
             constants_to_targets: HashMap::new(),
             targets_to_constants: HashMap::new(),
             base_arithmetic_results: HashMap::new(),
+            base_select_results: HashMap::new(),
             arithmetic_results: HashMap::new(),
             current_slots: HashMap::new(),
             constant_generators: Vec::new(),
@@ -1073,6 +1078,47 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
         mut self,
         commit_to_sigma: bool,
     ) -> (CircuitData<F, C, D>, bool) {
+        //Fill out the incomplete gates that need non-trivial generators and provide default values
+        let incomplete_gates = self
+            .current_slots
+            .values()
+            .flat_map(|current_slot| current_slot.current_slot.values().copied())
+            .collect::<HashMap<_, _>>();
+
+        let mut row_to_parameters: HashMap<usize, Vec<F>> = Default::default();
+        for (_gate_ref, current_slot) in &self.current_slots {
+            for (parameters, (row, _index)) in current_slot.current_slot.clone() {
+                row_to_parameters.insert(row, parameters);
+            }
+        }
+
+        let binding = self.gate_instances.clone();
+        let gate_instances_list = binding.iter().enumerate();
+
+        for (gate_row, gate) in gate_instances_list {
+            if let Some(&op) = incomplete_gates.get(&gate_row) {
+                let mut any_was_set: bool = false;
+                for j in op..gate.gate_ref.0.num_ops() {
+                    let defaults = gate.gate_ref.0.input_wires_defaults(j);
+                    any_was_set |= !defaults.is_empty();
+                    for (column, value) in defaults {
+                        let const_val = self.constant(value);
+                        self.connect(const_val, Target::wire(gate_row, column));
+                    }
+                }
+                if any_was_set {
+                    let params = row_to_parameters[&gate_row].clone();
+                    let target_slot = &mut self
+                        .current_slots
+                        .get_mut(&gate.gate_ref)
+                        .unwrap()
+                        .current_slot;
+                    target_slot.remove(&params);
+                }
+            }
+        }
+
+        // Original plonky2 code starts here
         let mut timing = TimingTree::new("preprocess", Level::Trace);
 
         #[cfg(feature = "timing")]
