@@ -110,8 +110,8 @@ impl<F: RichField + Extendable<D>, const D: usize> Gate<F, D> for Multiplication
             let multiplicand_0 = vars.local_wires[Self::wire_ith_multiplicand_0(i)];
             let multiplicand_1 = vars.local_wires[Self::wire_ith_multiplicand_1(i)];
             let output = vars.local_wires[Self::wire_ith_output(i)];
-            let computed_output = builder.mul_many_extension([const_0, multiplicand_0, multiplicand_1]);
-            
+            let computed_output =
+                builder.mul_many_extension([const_0, multiplicand_0, multiplicand_1]);
 
             let diff = builder.sub_extension(output, computed_output);
             constraints.push(diff);
@@ -152,7 +152,9 @@ impl<F: RichField + Extendable<D>, const D: usize> Gate<F, D> for Multiplication
     }
 }
 
-impl<F: RichField + Extendable<D>, const D: usize> PackedEvaluableBase<F, D> for MultiplicationGate {
+impl<F: RichField + Extendable<D>, const D: usize> PackedEvaluableBase<F, D>
+    for MultiplicationGate
+{
     fn eval_unfiltered_base_packed<P: PackedField<Scalar = F>>(
         &self,
         vars: EvaluationVarsBasePacked<P>,
@@ -187,7 +189,7 @@ impl<F: RichField + Extendable<D>, const D: usize> SimpleGenerator<F, D>
 
     fn dependencies(&self) -> Vec<Target> {
         [
-          MultiplicationGate::wire_ith_multiplicand_0(self.i),
+            MultiplicationGate::wire_ith_multiplicand_0(self.i),
             MultiplicationGate::wire_ith_multiplicand_1(self.i),
         ]
         .iter()
@@ -207,8 +209,7 @@ impl<F: RichField + Extendable<D>, const D: usize> SimpleGenerator<F, D>
 
         let output_target = Target::wire(self.row, MultiplicationGate::wire_ith_output(self.i));
 
-        let computed_output =
-            multiplicand_0 * multiplicand_1 * self.const_0;
+        let computed_output = multiplicand_0 * multiplicand_1 * self.const_0;
 
         out_buffer.set_target(output_target, computed_output)
     }
@@ -223,11 +224,7 @@ impl<F: RichField + Extendable<D>, const D: usize> SimpleGenerator<F, D>
         let row = src.read_usize()?;
         let const_0 = src.read_field()?;
         let i = src.read_usize()?;
-        Ok(Self {
-            row,
-            const_0,
-            i,
-        })
+        Ok(Self { row, const_0, i })
     }
 }
 
@@ -236,8 +233,8 @@ mod tests {
     use anyhow::Result;
 
     use crate::field::goldilocks_field::GoldilocksField;
-    use crate::gates::multiplication_base::MultiplicationGate;
     use crate::gates::gate_testing::{test_eval_fns, test_low_degree};
+    use crate::gates::multiplication_base::MultiplicationGate;
     use crate::plonk::circuit_data::CircuitConfig;
     use crate::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
 

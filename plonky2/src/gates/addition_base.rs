@@ -112,7 +112,7 @@ impl<F: RichField + Extendable<D>, const D: usize> Gate<F, D> for AdditionGate {
             let addend_0 = vars.local_wires[Self::wire_ith_addend_0(i)];
             let addend_1 = vars.local_wires[Self::wire_ith_addend_1(i)];
             let output = vars.local_wires[Self::wire_ith_output(i)];
-            
+
             let true_addend_0 = builder.mul_extension(const_0, addend_0);
             let true_addend_1 = builder.mul_extension(const_1, addend_1);
 
@@ -150,7 +150,7 @@ impl<F: RichField + Extendable<D>, const D: usize> Gate<F, D> for AdditionGate {
     }
 
     fn degree(&self) -> usize {
-        3
+        2
     }
 
     fn num_constraints(&self) -> usize {
@@ -195,7 +195,7 @@ impl<F: RichField + Extendable<D>, const D: usize> SimpleGenerator<F, D>
 
     fn dependencies(&self) -> Vec<Target> {
         [
-          AdditionGate::wire_ith_addend_0(self.i),
+            AdditionGate::wire_ith_addend_0(self.i),
             AdditionGate::wire_ith_addend_1(self.i),
         ]
         .iter()
@@ -215,8 +215,7 @@ impl<F: RichField + Extendable<D>, const D: usize> SimpleGenerator<F, D>
 
         let output_target = Target::wire(self.row, AdditionGate::wire_ith_output(self.i));
 
-        let computed_output =
-            addend_0 * self.const_0 + addend_1 * self.const_1;
+        let computed_output = addend_0 * self.const_0 + addend_1 * self.const_1;
 
         out_buffer.set_target(output_target, computed_output)
     }

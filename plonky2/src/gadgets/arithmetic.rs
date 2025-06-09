@@ -10,10 +10,10 @@ use anyhow::Result;
 
 use crate::field::extension::Extendable;
 use crate::field::types::Field64;
-use crate::gates::arithmetic_base::ArithmeticGate;
-use crate::gates::multiplication_base::MultiplicationGate;
 use crate::gates::addition_base::AdditionGate;
+use crate::gates::arithmetic_base::ArithmeticGate;
 use crate::gates::exponentiation::ExponentiationGate;
+use crate::gates::multiplication_base::MultiplicationGate;
 use crate::hash::hash_types::RichField;
 use crate::iop::generator::{GeneratedValues, SimpleGenerator};
 use crate::iop::target::{BoolTarget, Target};
@@ -21,30 +21,6 @@ use crate::iop::witness::{PartitionWitness, Witness, WitnessWrite};
 use crate::plonk::circuit_builder::CircuitBuilder;
 use crate::plonk::circuit_data::CommonCircuitData;
 use crate::util::serialization::{Buffer, IoResult, Read, Write};
-
-/* 
-use log::info;
-
-use std::sync::atomic::{AtomicUsize, Ordering};
-
-static MULTIPLICATION_COUNTER: AtomicUsize = AtomicUsize::new(0);
-
-fn register_multiplication() -> usize {
-    MULTIPLICATION_COUNTER.fetch_add(1, Ordering::Relaxed)
-}
-
-static ADDITION_COUNTER: AtomicUsize = AtomicUsize::new(0);
-
-fn register_addition() -> usize {
-    ADDITION_COUNTER.fetch_add(1, Ordering::Relaxed)
-}
-
-static MULTIPLICATION_CONSTANT_COUNTER: AtomicUsize = AtomicUsize::new(0);
-
-fn register_multiplication_constant() -> usize {
-    ADDITION_COUNTER.fetch_add(1, Ordering::Relaxed)
-}
-*/
 
 impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
     /// Computes `-x`.
@@ -112,26 +88,28 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
         let zero = self.zero();
         let one = self.one();
 
-        if multiplicand_0 == one {
-            //info!("Addition operation {:?}", register_addition());
+        //See if we can perform operation using a specialized custom gate
+        let use_multiplication: bool = ((multiplicand_0 == one) || (multiplicand_1 == one))
+            & self.config.mutliplication_gate_enabled();
+        let use_addition: bool = (addend == zero) & self.config.addition_gate_enabled();
+
+        if multiplicand_0 == one && use_addition {
             result = self.add_base_addition_operation(BaseAdditionOperation {
                 const_0: operation.const_0,
                 addend_0: operation.multiplicand_1,
                 const_1: operation.const_1,
                 addend_1: operation.addend,
             });
-        } else if multiplicand_1 == one {
-            //info!("Addition operation {:?}", register_addition());
-            
+        } else if multiplicand_1 == one && use_addition {
             result = self.add_base_addition_operation(BaseAdditionOperation {
                 const_0: operation.const_0,
                 addend_0: operation.multiplicand_0,
                 const_1: operation.const_1,
                 addend_1: operation.addend,
             });
-        } else if addend == zero {
-//            info!("Multiplication operation {:?}", register_multiplication());
-            result = self.add_base_multiplication_operation(BaseMultiplicationOperation::from(operation));
+        } else if addend == zero && use_multiplication {
+            result = self
+                .add_base_multiplication_operation(BaseMultiplicationOperation::from(operation));
         } else {
             result = self.add_base_arithmetic_operation(operation);
         }
@@ -140,7 +118,7 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
         self.base_arithmetic_results.insert(operation, result);
         result
     }
-    
+
     fn add_base_addition_operation(&mut self, operation: BaseAdditionOperation<F>) -> Target {
         let gate = AdditionGate::new_from_config(&self.config);
         let constants = vec![operation.const_0, operation.const_1];
@@ -154,12 +132,17 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
         Target::wire(gate, AdditionGate::wire_ith_output(i))
     }
 
-    fn add_base_multiplication_operation(&mut self, operation: BaseMultiplicationOperation<F>) -> Target {
+    fn add_base_multiplication_operation(
+        &mut self,
+        operation: BaseMultiplicationOperation<F>,
+    ) -> Target {
         let gate = MultiplicationGate::new_from_config(&self.config);
         let constants = vec![operation.const_0];
         let (gate, i) = self.find_slot(gate, &constants, &constants);
-        let wires_multiplicand_0 = Target::wire(gate, MultiplicationGate::wire_ith_multiplicand_0(i));
-        let wires_multiplicand_1 = Target::wire(gate, MultiplicationGate::wire_ith_multiplicand_1(i));
+        let wires_multiplicand_0 =
+            Target::wire(gate, MultiplicationGate::wire_ith_multiplicand_0(i));
+        let wires_multiplicand_1 =
+            Target::wire(gate, MultiplicationGate::wire_ith_multiplicand_1(i));
 
         self.connect(operation.multiplicand_0, wires_multiplicand_0);
         self.connect(operation.multiplicand_1, wires_multiplicand_1);
