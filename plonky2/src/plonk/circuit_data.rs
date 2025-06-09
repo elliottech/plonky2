@@ -145,7 +145,7 @@ impl CircuitConfig {
         0 < (self.optimization_flags & (1 << 0))
     }
 
-    pub fn mutliplication_gate_enabled(&self) -> bool {
+    pub fn multiplication_gate_enabled(&self) -> bool {
         0 < (self.optimization_flags & (1 << 1))
     }
 

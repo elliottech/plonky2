@@ -89,10 +89,9 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
         let one = self.one();
 
         //See if we can perform operation using a specialized custom gate
-        let use_multiplication: bool = ((multiplicand_0 == one) || (multiplicand_1 == one))
-            & self.config.mutliplication_gate_enabled();
-        let use_addition: bool = (addend == zero) & self.config.addition_gate_enabled();
-
+        let use_multiplication: bool = (addend == zero) & self.config.multiplication_gate_enabled();
+        let use_addition: bool = ((multiplicand_0 == one) || (multiplicand_1 == one))
+            & self.config.addition_gate_enabled();
         if multiplicand_0 == one && use_addition {
             result = self.add_base_addition_operation(BaseAdditionOperation {
                 const_0: operation.const_0,
