@@ -77,7 +77,7 @@ impl<F: RichField + Extendable<D>, const D: usize> Gate<F, D> for ArithmeticGate
     fn eval_unfiltered(&self, vars: EvaluationVars<F, D>) -> Vec<F::Extension> {
         let const_0 = vars.local_constants[0];
         let const_1 = vars.local_constants[1];
-        
+
         let mut constraints = Vec::with_capacity(self.num_ops);
         for i in 0..self.num_ops {
             let multiplicand_0 = vars.local_wires[Self::wire_ith_multiplicand_0(i)];

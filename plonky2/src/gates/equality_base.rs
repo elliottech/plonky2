@@ -15,7 +15,7 @@ use crate::gates::util::StridedConstraintConsumer;
 use crate::hash::hash_types::RichField;
 use crate::iop::ext_target::ExtensionTarget;
 use crate::iop::generator::{GeneratedValues, SimpleGenerator, WitnessGeneratorRef};
-use crate::iop::target::{Target, BoolTarget};
+use crate::iop::target::{BoolTarget, Target};
 use crate::iop::witness::{PartitionWitness, Witness, WitnessWrite};
 use crate::plonk::circuit_builder::CircuitBuilder;
 use crate::plonk::circuit_data::{CircuitConfig, CommonCircuitData};
@@ -33,7 +33,6 @@ pub struct EqualityGate {
 }
 
 impl EqualityGate {
-
     pub const fn new_from_config(config: &CircuitConfig) -> Self {
         Self {
             num_ops: Self::num_ops(config),
@@ -44,7 +43,7 @@ impl EqualityGate {
     const NOT_ROUTED_PER_OP: usize = 3;
     const TOTAL_PER_OP: usize = Self::ROUTED_PER_OP + Self::NOT_ROUTED_PER_OP;
     const PACKED_COUNT: usize = 22; // Ideally this wouldn't be a constant and would depend on config,
-                                   // however, plonky2 does not trivially allow wire placement dependent on configuration
+                                    // however, plonky2 does not trivially allow wire placement dependent on configuration
 
     /// Determine the maximum number of operations that can fit in one gate for the given config.
     pub(crate) const fn num_ops(_config: &CircuitConfig) -> usize {
@@ -62,12 +61,11 @@ impl EqualityGate {
     }
 
     pub(crate) const fn wire_ith_temporary(i: usize, j: usize) -> usize {
-      assert!(i < Self::PACKED_COUNT);
-      assert!(j < Self::NOT_ROUTED_PER_OP);
-      Self::ROUTED_PER_OP * Self::PACKED_COUNT + i * Self::NOT_ROUTED_PER_OP + j
-      //Self::PACKED_COUNT * Self::TOTAL_PER_OP * i + 3 + j
-    } 
-    
+        assert!(i < Self::PACKED_COUNT);
+        assert!(j < Self::NOT_ROUTED_PER_OP);
+        Self::ROUTED_PER_OP * Self::PACKED_COUNT + i * Self::NOT_ROUTED_PER_OP + j
+        //Self::PACKED_COUNT * Self::TOTAL_PER_OP * i + 3 + j
+    }
 }
 
 impl<F: RichField + Extendable<D>, const D: usize> Gate<F, D> for EqualityGate {
@@ -131,10 +129,10 @@ impl<F: RichField + Extendable<D>, const D: usize> Gate<F, D> for EqualityGate {
             let diff = vars.local_wires[Self::wire_ith_temporary(i, 0)];
             let invdiff = vars.local_wires[Self::wire_ith_temporary(i, 1)];
             let prod = vars.local_wires[Self::wire_ith_temporary(i, 2)];
-            
+
             constraints.push({
-              let inner = builder.sub_extension(x, y);
-              builder.sub_extension(inner, diff)
+                let inner = builder.sub_extension(x, y);
+                builder.sub_extension(inner, diff)
             });
             constraints.push(builder.mul_sub_extension(diff, invdiff, prod));
             constraints.push(builder.mul_sub_extension(prod, diff, diff));
@@ -146,7 +144,7 @@ impl<F: RichField + Extendable<D>, const D: usize> Gate<F, D> for EqualityGate {
     }
 
     fn generators(&self, row: usize, local_constants: &[F]) -> Vec<WitnessGeneratorRef<F, D>> {
-        let result: Vec<WitnessGeneratorRef<F, D>>  = (0..self.num_ops)
+        let result: Vec<WitnessGeneratorRef<F, D>> = (0..self.num_ops)
             .map(|i| {
                 WitnessGeneratorRef::new(
                     EqualityBaseGenerator {
@@ -179,7 +177,10 @@ impl<F: RichField + Extendable<D>, const D: usize> Gate<F, D> for EqualityGate {
     }
 
     fn input_wires_defaults(&self, index: usize) -> Vec<(usize, F)> {
-        Vec::from([(Self::wire_ith_element_0(index), F::ZERO), (Self::wire_ith_element_1(index), F::ZERO)])
+        Vec::from([
+            (Self::wire_ith_element_0(index), F::ZERO),
+            (Self::wire_ith_element_1(index), F::ZERO),
+        ])
     }
 }
 
@@ -197,7 +198,7 @@ impl<F: RichField + Extendable<D>, const D: usize> PackedEvaluableBase<F, D> for
             let diff = vars.local_wires[Self::wire_ith_temporary(i, 0)];
             let invdiff = vars.local_wires[Self::wire_ith_temporary(i, 1)];
             let prod = vars.local_wires[Self::wire_ith_temporary(i, 2)];
-            
+
             yield_constr.one((x - y) - diff);
             yield_constr.one((diff * invdiff) - prod);
             yield_constr.one((prod * diff) - diff);
@@ -217,7 +218,7 @@ impl<F: RichField + Extendable<D>, const D: usize> SimpleGenerator<F, D>
     for EqualityBaseGenerator<F, D>
 {
     fn id(&self) -> String {
-      format!("{self:?}")
+        format!("{self:?}")
     }
 
     fn dependencies(&self) -> Vec<Target> {
@@ -237,16 +238,15 @@ impl<F: RichField + Extendable<D>, const D: usize> SimpleGenerator<F, D>
     ) -> Result<()> {
         let get_wire = |wire: usize| -> F { witness.get_target(Target::wire(self.row, wire)) };
 
-        let x = get_wire( EqualityGate::wire_ith_element_0(self.i));
-        let y =  get_wire( EqualityGate::wire_ith_element_1(self.i));
-        let equal =  Target::wire(self.row, EqualityGate::wire_ith_output(self.i));
-        let diff =  Target::wire(self.row,EqualityGate::wire_ith_temporary(self.i, 0));
-        let invdiff =  Target::wire(self.row,EqualityGate::wire_ith_temporary(self.i, 1));
-        let prod =  Target::wire(self.row,EqualityGate::wire_ith_temporary(self.i, 2));
+        let x = get_wire(EqualityGate::wire_ith_element_0(self.i));
+        let y = get_wire(EqualityGate::wire_ith_element_1(self.i));
+        let equal = Target::wire(self.row, EqualityGate::wire_ith_output(self.i));
+        let diff = Target::wire(self.row, EqualityGate::wire_ith_temporary(self.i, 0));
+        let invdiff = Target::wire(self.row, EqualityGate::wire_ith_temporary(self.i, 1));
+        let prod = Target::wire(self.row, EqualityGate::wire_ith_temporary(self.i, 2));
 
         let inv_value = if x != y { (x - y).inverse() } else { F::ZERO };
-        let prod_value = if x != y {F::ONE} else { F::ZERO };
-
+        let prod_value = if x != y { F::ONE } else { F::ZERO };
 
         out_buffer.set_target(diff, x - y)?;
         out_buffer.set_bool_target(BoolTarget::new_unsafe(equal), x == y)?;
@@ -264,11 +264,7 @@ impl<F: RichField + Extendable<D>, const D: usize> SimpleGenerator<F, D>
         let row = src.read_usize()?;
         let const_0 = src.read_field()?;
         let i = src.read_usize()?;
-        Ok(Self {
-            row,
-            const_0,
-            i,
-        })
+        Ok(Self { row, const_0, i })
     }
 }
 
@@ -277,17 +273,16 @@ mod tests {
     use anyhow::Result;
 
     use crate::field::goldilocks_field::GoldilocksField;
-    use crate::gates::equality_base::{EqualityGate};
-    use crate::gates::gate_testing::{test_eval_fns, test_low_degree};
-    use crate::plonk::circuit_data::CircuitConfig;
-    use crate::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
-    use crate::plonk::circuit_builder::CircuitBuilder;
-    use crate::iop::witness::PartialWitness;
     use crate::field::types::Field;
     #[allow(unused_imports)]
     use crate::field::types::Field64;
-    use crate::iop::target::{Target, BoolTarget};
-    use crate::iop::witness::WitnessWrite;
+    use crate::gates::equality_base::EqualityGate;
+    use crate::gates::gate_testing::{test_eval_fns, test_low_degree};
+    use crate::iop::target::{BoolTarget, Target};
+    use crate::iop::witness::{PartialWitness, WitnessWrite};
+    use crate::plonk::circuit_builder::CircuitBuilder;
+    use crate::plonk::circuit_data::CircuitConfig;
+    use crate::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
 
     #[test]
     fn low_degree() {
@@ -309,33 +304,33 @@ mod tests {
         const D: usize = 2;
         type C = PoseidonGoldilocksConfig;
         type F = <C as GenericConfig<D>>::F;
-    
+
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::<F, D>::new(config.clone());
-    
+
         // Create targets for x and y
         let x = builder.add_virtual_target();
         let y = builder.add_virtual_target();
-    
+
         // Instantiate your custom EqualityGate and get BoolTarget
         let gate = EqualityGate::new_from_config(&config);
         let constants = vec![F::ONE];
         let (gate_row, i) = builder.find_slot(gate, &constants, &constants);
-        
+
         let wire_x = Target::wire(gate_row, EqualityGate::wire_ith_element_0(i));
         let wire_y = Target::wire(gate_row, EqualityGate::wire_ith_element_1(i));
         let wire_equal = Target::wire(gate_row, EqualityGate::wire_ith_output(i));
-      
+
         builder.connect(x, wire_x);
         builder.connect(y, wire_y);
 
         let equal = BoolTarget::new_unsafe(wire_equal);
-        
+
         // Optionally use equal in the circuit logic
         builder.assert_bool(equal);
-        
+
         let circuit_data = builder.build::<C>();
-    
+
         // Now set values for x and y such that x == y, so equal = 1
         let mut pw = PartialWitness::new();
         let value1 = F::from_canonical_u64(17);
@@ -345,8 +340,7 @@ mod tests {
 
         let proof = circuit_data.prove(pw)?;
         circuit_data.verify(proof)?;
-    
+
         Ok(())
     }
-    
 }

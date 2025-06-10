@@ -152,7 +152,7 @@ impl CircuitConfig {
     pub fn quintic_multiplication_gate_enabled(&self) -> bool {
         0 < (self.optimization_flags & (1 << 2))
     }
-    
+
     pub fn equality_gate_enable(&self) -> bool {
         0 < (self.optimization_flags & (1 << 3))
     }
