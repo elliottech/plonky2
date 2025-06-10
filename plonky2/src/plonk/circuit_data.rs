@@ -156,6 +156,9 @@ impl CircuitConfig {
     pub fn equality_gate_enable(&self) -> bool {
         0 < (self.optimization_flags & (1 << 3))
     }
+    pub fn quintic_squaring_gate_enabled(&self) -> bool {
+        0 < (self.optimization_flags & (1 << 4))
+    }
 }
 
 /// Mock circuit data to only do witness generation without generating a proof.
