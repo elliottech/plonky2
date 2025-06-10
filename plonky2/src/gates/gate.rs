@@ -251,6 +251,12 @@ pub trait Gate<F: RichField + Extendable<D>, const D: usize>: 'static + Send + S
     fn extra_constant_wires(&self) -> Vec<(usize, usize)> {
         vec![]
     }
+
+    //In the case of multiple operations that use non-trivial generators
+    //the user must provide defaults to the input wires 
+    fn input_wires_defaults(&self, _index: usize) -> Vec<(usize, F)> {
+        vec![]
+    }
 }
 
 /// A wrapper trait over a `Gate`, to allow for gate serialization.

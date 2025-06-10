@@ -11,6 +11,7 @@ use anyhow::Result;
 use crate::field::extension::Extendable;
 use crate::field::types::Field64;
 use crate::gates::addition_base::AdditionGate;
+use crate::gates::equality_base::{EqualityGate};
 use crate::gates::arithmetic_base::ArithmeticGate;
 use crate::gates::exponentiation::ExponentiationGate;
 use crate::gates::multiplication_base::MultiplicationGate;
@@ -422,23 +423,38 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
 
     /// Checks whether `x` and `y` are equal and outputs the boolean result.
     pub fn is_equal(&mut self, x: Target, y: Target) -> BoolTarget {
-        let zero = self.zero();
 
-        let equal = self.add_virtual_bool_target_unsafe();
-        let not_equal = self.not(equal);
-        let inv = self.add_virtual_target();
-        self.add_simple_generator(EqualityGenerator { x, y, equal, inv });
+        if self.config.equality_gate_enable(){
+            let gate = EqualityGate::new_from_config(&self.config);
+            let constants = vec![F::ONE];            
+            let (gate, i) = self.find_slot(gate, &constants, &constants);
+            
+            let wires_x = Target::wire(gate, EqualityGate::wire_ith_element_0(i));
+            let wires_y = Target::wire(gate, EqualityGate::wire_ith_element_1(i));            
+            self.connect(x, wires_x);
+            self.connect(y, wires_y);
+    
+            let equal = BoolTarget::new_unsafe(Target::wire(gate, EqualityGate::wire_ith_output(i)));
+            equal
+        } else {
+            let zero = self.zero();
 
-        let diff = self.sub(x, y);
-        let not_equal_check = self.mul(equal.target, diff);
+            let equal = self.add_virtual_bool_target_unsafe();
+            let not_equal = self.not(equal);
+            let inv = self.add_virtual_target();
+            self.add_simple_generator(EqualityGenerator { x, y, equal, inv });
 
-        let diff_normalized = self.mul(diff, inv);
-        let equal_check = self.sub(diff_normalized, not_equal.target);
+            let diff = self.sub(x, y);
+            let not_equal_check = self.mul(equal.target, diff);
 
-        self.connect(not_equal_check, zero);
-        self.connect(equal_check, zero);
+            let diff_normalized = self.mul(diff, inv);
+            let equal_check = self.sub(diff_normalized, not_equal.target);
 
-        equal
+            self.connect(not_equal_check, zero);
+            self.connect(equal_check, zero);
+
+            equal
+        }
     }
 }
 
