@@ -425,16 +425,17 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
     pub fn is_equal(&mut self, x: Target, y: Target) -> BoolTarget {
         if self.config.equality_gate_enable() {
             let gate = EqualityGate::new_from_config(&self.config);
+            let gate_ref = gate.clone();
             let constants = vec![F::ONE];
             let (gate, i) = self.find_slot(gate, &constants, &constants);
 
-            let wires_x = Target::wire(gate, EqualityGate::wire_ith_element_0(i));
-            let wires_y = Target::wire(gate, EqualityGate::wire_ith_element_1(i));
+            let wires_x = Target::wire(gate, gate_ref.wire_ith_element_0(i));
+            let wires_y = Target::wire(gate, gate_ref.wire_ith_element_1(i));
             self.connect(x, wires_x);
             self.connect(y, wires_y);
 
             let equal =
-                BoolTarget::new_unsafe(Target::wire(gate, EqualityGate::wire_ith_output(i)));
+                BoolTarget::new_unsafe(Target::wire(gate, gate_ref.wire_ith_output(i)));
             equal
         } else {
             let zero = self.zero();

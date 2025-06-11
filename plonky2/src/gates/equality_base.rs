@@ -26,7 +26,7 @@ use crate::plonk::vars::{
 use crate::util::serialization::{Buffer, IoResult, Read, Write};
 
 /// A gate specialized for Equality Checks
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct EqualityGate {
     /// Number of additions operations performed by an Equality gate.
     pub num_ops: usize,
@@ -42,29 +42,34 @@ impl EqualityGate {
     const ROUTED_PER_OP: usize = 3;
     const NOT_ROUTED_PER_OP: usize = 3;
     const TOTAL_PER_OP: usize = Self::ROUTED_PER_OP + Self::NOT_ROUTED_PER_OP;
-    const PACKED_COUNT: usize = 22; // Ideally this wouldn't be a constant and would depend on config,
-                                    // however, plonky2 does not trivially allow wire placement dependent on configuration
-
     /// Determine the maximum number of operations that can fit in one gate for the given config.
-    pub(crate) const fn num_ops(_config: &CircuitConfig) -> usize {
-        Self::PACKED_COUNT
+    pub(crate) const fn num_ops(config: &CircuitConfig) -> usize {
+        let routed_packed_count = config.num_routed_wires / Self::ROUTED_PER_OP;
+        let unrouted_packed_count = config.num_wires / Self::TOTAL_PER_OP;
+        if routed_packed_count < unrouted_packed_count {
+            routed_packed_count
+        } else {
+            unrouted_packed_count
+        }
     }
 
-    pub(crate) const fn wire_ith_element_0(i: usize) -> usize {
+    pub(crate) const fn wire_ith_element_0(&self, i: usize) -> usize {
+        assert!(i < self.num_ops);
         Self::ROUTED_PER_OP * i
     }
-    pub(crate) const fn wire_ith_element_1(i: usize) -> usize {
+    pub(crate) const fn wire_ith_element_1(&self, i: usize) -> usize {
+        assert!(i < self.num_ops);
         Self::ROUTED_PER_OP * i + 1
     }
-    pub(crate) const fn wire_ith_output(i: usize) -> usize {
+    pub(crate) const fn wire_ith_output(&self, i: usize) -> usize {
+        assert!(i < self.num_ops);
         Self::ROUTED_PER_OP * i + 2
     }
 
-    pub(crate) const fn wire_ith_temporary(i: usize, j: usize) -> usize {
-        assert!(i < Self::PACKED_COUNT);
+    pub(crate) const fn wire_ith_temporary(&self, i: usize, j: usize) -> usize {
+        assert!(i < self.num_ops);
         assert!(j < Self::NOT_ROUTED_PER_OP);
-        Self::ROUTED_PER_OP * Self::PACKED_COUNT + i * Self::NOT_ROUTED_PER_OP + j
-        //Self::PACKED_COUNT * Self::TOTAL_PER_OP * i + 3 + j
+        Self::ROUTED_PER_OP * self.num_ops + i * Self::NOT_ROUTED_PER_OP + j
     }
 }
 
@@ -87,12 +92,12 @@ impl<F: RichField + Extendable<D>, const D: usize> Gate<F, D> for EqualityGate {
         let mut constraints = Vec::with_capacity(self.num_ops * 4);
 
         for i in 0..self.num_ops {
-            let x = vars.local_wires[Self::wire_ith_element_0(i)];
-            let y = vars.local_wires[Self::wire_ith_element_1(i)];
-            let equal = vars.local_wires[Self::wire_ith_output(i)];
-            let diff = vars.local_wires[Self::wire_ith_temporary(i, 0)];
-            let invdiff = vars.local_wires[Self::wire_ith_temporary(i, 1)];
-            let prod = vars.local_wires[Self::wire_ith_temporary(i, 2)];
+            let x = vars.local_wires[self.wire_ith_element_0(i)];
+            let y = vars.local_wires[self.wire_ith_element_1(i)];
+            let equal = vars.local_wires[self.wire_ith_output(i)];
+            let diff = vars.local_wires[self.wire_ith_temporary(i, 0)];
+            let invdiff = vars.local_wires[self.wire_ith_temporary(i, 1)];
+            let prod = vars.local_wires[self.wire_ith_temporary(i, 2)];
             constraints.push((x - y) - diff);
             constraints.push((diff * invdiff) - prod);
             constraints.push((prod * diff) - diff);
@@ -123,12 +128,12 @@ impl<F: RichField + Extendable<D>, const D: usize> Gate<F, D> for EqualityGate {
         let mut constraints = Vec::with_capacity(self.num_ops * 4);
 
         for i in 0..self.num_ops {
-            let x = vars.local_wires[Self::wire_ith_element_0(i)];
-            let y = vars.local_wires[Self::wire_ith_element_1(i)];
-            let equal = vars.local_wires[Self::wire_ith_output(i)];
-            let diff = vars.local_wires[Self::wire_ith_temporary(i, 0)];
-            let invdiff = vars.local_wires[Self::wire_ith_temporary(i, 1)];
-            let prod = vars.local_wires[Self::wire_ith_temporary(i, 2)];
+            let x = vars.local_wires[self.wire_ith_element_0(i)];
+            let y = vars.local_wires[self.wire_ith_element_1(i)];
+            let equal = vars.local_wires[self.wire_ith_output(i)];
+            let diff = vars.local_wires[self.wire_ith_temporary(i, 0)];
+            let invdiff = vars.local_wires[self.wire_ith_temporary(i, 1)];
+            let prod = vars.local_wires[self.wire_ith_temporary(i, 2)];
 
             constraints.push({
                 let inner = builder.sub_extension(x, y);
@@ -148,6 +153,7 @@ impl<F: RichField + Extendable<D>, const D: usize> Gate<F, D> for EqualityGate {
             .map(|i| {
                 WitnessGeneratorRef::new(
                     EqualityBaseGenerator {
+                        gate: self.clone(),
                         row,
                         const_0: local_constants[0],
                         i,
@@ -178,8 +184,8 @@ impl<F: RichField + Extendable<D>, const D: usize> Gate<F, D> for EqualityGate {
 
     fn input_wires_defaults(&self, index: usize) -> Vec<(usize, F)> {
         Vec::from([
-            (Self::wire_ith_element_0(index), F::ZERO),
-            (Self::wire_ith_element_1(index), F::ZERO),
+            (self.wire_ith_element_0(index), F::ZERO),
+            (self.wire_ith_element_1(index), F::ZERO),
         ])
     }
 }
@@ -192,12 +198,12 @@ impl<F: RichField + Extendable<D>, const D: usize> PackedEvaluableBase<F, D> for
     ) {
         let const_0 = vars.local_constants[0];
         for i in 0..self.num_ops {
-            let x = vars.local_wires[Self::wire_ith_element_0(i)];
-            let y = vars.local_wires[Self::wire_ith_element_1(i)];
-            let equal = vars.local_wires[Self::wire_ith_output(i)];
-            let diff = vars.local_wires[Self::wire_ith_temporary(i, 0)];
-            let invdiff = vars.local_wires[Self::wire_ith_temporary(i, 1)];
-            let prod = vars.local_wires[Self::wire_ith_temporary(i, 2)];
+            let x = vars.local_wires[self.wire_ith_element_0(i)];
+            let y = vars.local_wires[self.wire_ith_element_1(i)];
+            let equal = vars.local_wires[self.wire_ith_output(i)];
+            let diff = vars.local_wires[self.wire_ith_temporary(i, 0)];
+            let invdiff = vars.local_wires[self.wire_ith_temporary(i, 1)];
+            let prod = vars.local_wires[self.wire_ith_temporary(i, 2)];
 
             yield_constr.one((x - y) - diff);
             yield_constr.one((diff * invdiff) - prod);
@@ -209,6 +215,7 @@ impl<F: RichField + Extendable<D>, const D: usize> PackedEvaluableBase<F, D> for
 
 #[derive(Clone, Debug, Default)]
 pub struct EqualityBaseGenerator<F: RichField + Extendable<D>, const D: usize> {
+    pub gate: EqualityGate,
     pub row: usize,
     pub const_0: F,
     pub i: usize,
@@ -223,8 +230,8 @@ impl<F: RichField + Extendable<D>, const D: usize> SimpleGenerator<F, D>
 
     fn dependencies(&self) -> Vec<Target> {
         [
-            EqualityGate::wire_ith_element_0(self.i),
-            EqualityGate::wire_ith_element_1(self.i),
+            self.gate.wire_ith_element_0(self.i),
+            self.gate.wire_ith_element_1(self.i),
         ]
         .iter()
         .map(|&i| Target::wire(self.row, i))
@@ -238,12 +245,12 @@ impl<F: RichField + Extendable<D>, const D: usize> SimpleGenerator<F, D>
     ) -> Result<()> {
         let get_wire = |wire: usize| -> F { witness.get_target(Target::wire(self.row, wire)) };
 
-        let x = get_wire(EqualityGate::wire_ith_element_0(self.i));
-        let y = get_wire(EqualityGate::wire_ith_element_1(self.i));
-        let equal = Target::wire(self.row, EqualityGate::wire_ith_output(self.i));
-        let diff = Target::wire(self.row, EqualityGate::wire_ith_temporary(self.i, 0));
-        let invdiff = Target::wire(self.row, EqualityGate::wire_ith_temporary(self.i, 1));
-        let prod = Target::wire(self.row, EqualityGate::wire_ith_temporary(self.i, 2));
+        let x = get_wire(self.gate.wire_ith_element_0(self.i));
+        let y = get_wire(self.gate.wire_ith_element_1(self.i));
+        let equal = Target::wire(self.row, self.gate.wire_ith_output(self.i));
+        let diff = Target::wire(self.row, self.gate.wire_ith_temporary(self.i, 0));
+        let invdiff = Target::wire(self.row, self.gate.wire_ith_temporary(self.i, 1));
+        let prod = Target::wire(self.row, self.gate.wire_ith_temporary(self.i, 2));
 
         let inv_value = if x != y { (x - y).inverse() } else { F::ZERO };
         let prod_value = if x != y { F::ONE } else { F::ZERO };
@@ -254,17 +261,19 @@ impl<F: RichField + Extendable<D>, const D: usize> SimpleGenerator<F, D>
         out_buffer.set_target(invdiff, inv_value)
     }
 
-    fn serialize(&self, dst: &mut Vec<u8>, _common_data: &CommonCircuitData<F, D>) -> IoResult<()> {
+    fn serialize(&self, dst: &mut Vec<u8>, common_data: &CommonCircuitData<F, D>) -> IoResult<()> {
+        self.gate.serialize(dst, common_data)?;
         dst.write_usize(self.row)?;
         dst.write_field(self.const_0)?;
         dst.write_usize(self.i)
     }
 
-    fn deserialize(src: &mut Buffer, _common_data: &CommonCircuitData<F, D>) -> IoResult<Self> {
+    fn deserialize(src: &mut Buffer, common_data: &CommonCircuitData<F, D>) -> IoResult<Self> {
+        let gate = EqualityGate::deserialize(src, common_data)?;
         let row = src.read_usize()?;
         let const_0 = src.read_field()?;
         let i = src.read_usize()?;
-        Ok(Self { row, const_0, i })
+        Ok(Self {gate, row, const_0, i })
     }
 }
 
@@ -314,12 +323,13 @@ mod tests {
 
         // Instantiate your custom EqualityGate and get BoolTarget
         let gate = EqualityGate::new_from_config(&config);
+        let ref_gate = gate.clone();
         let constants = vec![F::ONE];
         let (gate_row, i) = builder.find_slot(gate, &constants, &constants);
 
-        let wire_x = Target::wire(gate_row, EqualityGate::wire_ith_element_0(i));
-        let wire_y = Target::wire(gate_row, EqualityGate::wire_ith_element_1(i));
-        let wire_equal = Target::wire(gate_row, EqualityGate::wire_ith_output(i));
+        let wire_x = Target::wire(gate_row, ref_gate.wire_ith_element_0(i));
+        let wire_y = Target::wire(gate_row, ref_gate.wire_ith_element_1(i));
+        let wire_equal = Target::wire(gate_row, ref_gate.wire_ith_output(i));
 
         builder.connect(x, wire_x);
         builder.connect(y, wire_y);
@@ -335,8 +345,8 @@ mod tests {
         let mut pw = PartialWitness::new();
         let value1 = F::from_canonical_u64(17);
         let value2 = F::from_canonical_u64(18);
-        let _ = pw.set_target(x, value1);
-        pw.set_target(y, value2);
+        pw.set_target(x, value1)?;
+        pw.set_target(y, value2)?;
 
         let proof = circuit_data.prove(pw)?;
         circuit_data.verify(proof)?;
