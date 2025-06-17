@@ -1,4 +1,5 @@
 use crate::field::extension::Extendable;
+use crate::gates::select_base::SelectionGate;
 use crate::hash::hash_types::RichField;
 use crate::iop::ext_target::ExtensionTarget;
 use crate::iop::target::{BoolTarget, Target};
@@ -31,9 +32,44 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
 
     /// See `select_ext`.
     pub fn select(&mut self, b: BoolTarget, x: Target, y: Target) -> Target {
-        let tmp = self.mul_sub(b.target, y, y);
-        self.mul_sub(b.target, x, tmp)
+        // See if we've already computed the same operation.
+        let operation = BaseSelectionOperation {
+            b: b.target,
+            x: x,
+            y: y,
+        };
+        if let Some(&result) = self.base_select_results.get(&operation) {
+            return result;
+        }
+
+        let result = if self.config.select_gate_enabled() {
+            let gate = SelectionGate::new_from_config(&self.config);
+            let gate_ref = gate.clone();
+            let constants = vec![];
+            let (gate, i) = self.find_slot(gate, &constants, &constants);
+
+            let wires_b = BoolTarget::new_unsafe(Target::wire(gate, gate_ref.wire_ith_selector(i)));
+            let wires_x = Target::wire(gate, gate_ref.wire_ith_element_0(i));
+            let wires_y = Target::wire(gate, gate_ref.wire_ith_element_1(i));
+            self.connect(b.target, wires_b.target);
+            self.connect(x, wires_x);
+            self.connect(y, wires_y);
+
+            Target::wire(gate, gate_ref.wire_ith_output(i))
+        } else {
+            let tmp = self.mul_sub(b.target, y, y);
+            self.mul_sub(b.target, x, tmp)
+        };
+
+        self.base_select_results.insert(operation, result);
+        result
     }
+}
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+pub(crate) struct BaseSelectionOperation {
+    b: Target,
+    x: Target,
+    y: Target,
 }
 
 #[cfg(test)]

@@ -3,6 +3,7 @@
 #[cfg(not(feature = "std"))]
 use alloc::{collections::BTreeMap, sync::Arc, vec, vec::Vec};
 use core::cmp::max;
+use core::hash::Hash;
 #[cfg(feature = "std")]
 use std::{collections::BTreeMap, sync::Arc};
 
@@ -22,6 +23,7 @@ use crate::fri::{FriConfig, FriParams};
 use crate::gadgets::arithmetic::BaseArithmeticOperation;
 use crate::gadgets::arithmetic_extension::ExtensionArithmeticOperation;
 use crate::gadgets::polynomial::PolynomialCoeffsExtTarget;
+use crate::gadgets::select::BaseSelectionOperation;
 use crate::gates::arithmetic_base::ArithmeticGate;
 use crate::gates::arithmetic_extension::ArithmeticExtensionGate;
 use crate::gates::constant::ConstantGate;
@@ -173,6 +175,9 @@ pub struct CircuitBuilder<F: RichField + Extendable<D>, const D: usize> {
     /// Memoized results of `arithmetic` calls.
     pub(crate) base_arithmetic_results: HashMap<BaseArithmeticOperation<F>, Target>,
 
+    /// Memoized results of 'select' calls.
+    pub(crate) base_select_results: HashMap<BaseSelectionOperation, Target>,
+
     /// Memoized results of `arithmetic_extension` calls.
     pub(crate) arithmetic_results: HashMap<ExtensionArithmeticOperation<F, D>, ExtensionTarget<D>>,
 
@@ -221,6 +226,7 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
             constants_to_targets: HashMap::new(),
             targets_to_constants: HashMap::new(),
             base_arithmetic_results: HashMap::new(),
+            base_select_results: HashMap::new(),
             arithmetic_results: HashMap::new(),
             current_slots: HashMap::new(),
             constant_generators: Vec::new(),
