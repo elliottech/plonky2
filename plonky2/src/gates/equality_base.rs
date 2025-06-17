@@ -175,7 +175,7 @@ impl<F: RichField + Extendable<D>, const D: usize> Gate<F, D> for EqualityGate {
     }
 
     fn degree(&self) -> usize {
-        3
+        2
     }
 
     fn num_constraints(&self) -> usize {
