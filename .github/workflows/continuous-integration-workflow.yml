@@ -106,7 +106,7 @@ jobs:
       - name: Install nightly toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: nightly-2024-02-01
+          toolchain: nightly-2024-06-23
 
       - name: Set up rust cache
         uses: Swatinem/rust-cache@v2
