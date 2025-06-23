@@ -141,12 +141,11 @@ jobs:
       - name: Install nightly toolchain
         uses: dtolnay/rust-toolchain@nightly
         with:
+          toolchain: nightly-2024-06-23
           components: rustfmt, clippy
-
-      - name: Set up rust cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
+      
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2.7.3
 
       - name: Run cargo fmt
         run: cargo fmt --all --check
