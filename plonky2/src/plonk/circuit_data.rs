@@ -84,6 +84,7 @@ pub struct CircuitConfig {
     /// systematically, but will never exceed this value.
     pub max_quotient_degree_factor: usize,
     pub fri_config: FriConfig,
+    pub optimization_flags: usize,
 }
 
 impl Default for CircuitConfig {
@@ -115,6 +116,7 @@ impl CircuitConfig {
                 reduction_strategy: FriReductionStrategy::ConstantArityBits(4, 5),
                 num_query_rounds: 28,
             },
+            optimization_flags: 0,
         }
     }
 
@@ -137,6 +139,30 @@ impl CircuitConfig {
             zero_knowledge: true,
             ..Self::standard_recursion_config()
         }
+    }
+
+    pub fn addition_gate_enabled(&self) -> bool {
+        0 < (self.optimization_flags & (1 << 0))
+    }
+
+    pub fn multiplication_gate_enabled(&self) -> bool {
+        0 < (self.optimization_flags & (1 << 1))
+    }
+
+    pub fn quintic_multiplication_gate_enabled(&self) -> bool {
+        0 < (self.optimization_flags & (1 << 2))
+    }
+
+    pub fn equality_gate_enable(&self) -> bool {
+        0 < (self.optimization_flags & (1 << 3))
+    }
+
+    pub fn quintic_squaring_gate_enabled(&self) -> bool {
+        0 < (self.optimization_flags & (1 << 4))
+    }
+
+    pub fn select_gate_enabled(&self) -> bool {
+        0 < (self.optimization_flags & (1 << 5))
     }
 }
 

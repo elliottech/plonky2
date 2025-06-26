@@ -106,19 +106,23 @@ pub mod default {
     use crate::gadgets::range_check::LowHighGenerator;
     use crate::gadgets::split_base::BaseSumGenerator;
     use crate::gadgets::split_join::{SplitGenerator, WireSplitGenerator};
+    use crate::gates::addition_base::AdditionBaseGenerator;
     use crate::gates::arithmetic_base::ArithmeticBaseGenerator;
     use crate::gates::arithmetic_extension::ArithmeticExtensionGenerator;
     use crate::gates::base_sum::BaseSplitGenerator;
     use crate::gates::coset_interpolation::InterpolationGenerator;
+    use crate::gates::equality_base::EqualityBaseGenerator;
     use crate::gates::exponentiation::ExponentiationGenerator;
     use crate::gates::lookup::LookupGenerator;
     use crate::gates::lookup_table::LookupTableGenerator;
+    use crate::gates::multiplication_base::MultiplicationBaseGenerator;
     use crate::gates::multiplication_extension::MulExtensionGenerator;
     use crate::gates::poseidon::PoseidonGenerator;
     use crate::gates::poseidon_mds::PoseidonMdsGenerator;
     use crate::gates::random_access::RandomAccessGenerator;
     use crate::gates::reducing::ReducingGenerator;
     use crate::gates::reducing_extension::ReducingGenerator as ReducingExtensionGenerator;
+    use crate::gates::select_base::SelectionBaseGenerator;
     use crate::hash::hash_types::RichField;
     use crate::iop::generator::{
         ConstantGenerator, CopyGenerator, NonzeroTestGenerator, RandomValueGenerator,
@@ -155,12 +159,16 @@ pub mod default {
             DefaultGeneratorSerializer,
             ArithmeticBaseGenerator<F, D>,
             ArithmeticExtensionGenerator<F, D>,
+            AdditionBaseGenerator<F,D>,
+            MultiplicationBaseGenerator<F,D>,
             BaseSplitGenerator<2>,
             BaseSumGenerator<2>,
             ConstantGenerator<F>,
             CopyGenerator,
             DummyProofGenerator<F, C, D>,
             EqualityGenerator,
+            EqualityBaseGenerator<F,D>,
+            SelectionBaseGenerator<F, D>,
             ExponentiationGenerator<F, D>,
             InterpolationGenerator<F, D>,
             LookupGenerator,
