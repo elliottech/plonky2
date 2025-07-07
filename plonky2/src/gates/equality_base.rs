@@ -295,6 +295,7 @@ mod tests {
     use crate::plonk::circuit_builder::CircuitBuilder;
     use crate::plonk::circuit_data::CircuitConfig;
     use crate::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
+    use plonky2_field::types::Sample;
 
     #[test]
     fn low_degree() {
@@ -312,7 +313,7 @@ mod tests {
     }
 
     #[test]
-    fn test_succes() -> Result<()> {
+    fn test_succes_initial() -> Result<()> {
         const D: usize = 2;
         type C = PoseidonGoldilocksConfig;
         type F = <C as GenericConfig<D>>::F;
@@ -355,5 +356,159 @@ mod tests {
         circuit_data.verify(proof)?;
 
         Ok(())
+    }
+
+    
+    #[test]
+    #[should_panic]
+    fn test_failure() {
+        const D: usize = 2;
+        type C = PoseidonGoldilocksConfig;
+        type F = <C as GenericConfig<D>>::F;
+
+        fn flag_test(flag: usize) {
+            let config = CircuitConfig {
+                optimization_flags: flag,
+                ..CircuitConfig::standard_recursion_config()
+            };
+            let mut builder = CircuitBuilder::<F, D>::new(config.clone());
+
+            let mut pairs = Vec::new();
+            let gate = EqualityGate::new_from_config(&config);
+            let ref_gate = gate.clone();
+            let constants = [F::ONE];
+
+            for _ in 0..100 {
+                let x = builder.add_virtual_target();
+                let y = builder.add_virtual_target();
+                let output_value = builder.add_virtual_target();
+
+                let (gate_row, i) = builder.find_slot(gate.clone(), &constants, &constants);
+
+                let wire_x = Target::wire(gate_row, ref_gate.wire_ith_element_0(i));
+                let wire_y = Target::wire(gate_row, ref_gate.wire_ith_element_1(i));
+                let wire_equal = Target::wire(gate_row, ref_gate.wire_ith_output(i));
+
+                builder.connect(x, wire_x);
+                builder.connect(y, wire_y);
+                builder.connect(output_value, wire_equal);
+
+                pairs.push((x, y, output_value));
+
+            }
+
+            let circuit_data = builder.build::<C>();
+            let mut pw = PartialWitness::new();
+
+            for (i, (x, y, output_value)) in pairs.iter().enumerate() {
+                if i < 50 {
+                    let value = F::rand();
+                    pw.set_target(*x, value).unwrap();
+                    pw.set_target(*y, value).unwrap();
+                    let incorrect_value = F::ZERO;
+                    pw.set_target(*output_value, incorrect_value).unwrap();
+                } else {
+                    let value1 = F::rand();
+                    let mut value2 = F::rand();
+                        
+                    while value2 == value1 {
+                        value2 = F::rand();
+                    }
+            
+                    pw.set_target(*x, value1).unwrap();
+                    pw.set_target(*y, value2).unwrap();
+                    let incorrect_value = F::ONE;
+                    pw.set_target(*output_value, incorrect_value).unwrap();
+                }
+
+            }
+                
+            let proof = circuit_data.prove(pw).unwrap();
+            circuit_data.verify(proof).unwrap();
+
+        }
+
+        flag_test(63); // flag enabled
+        flag_test(55); // flag disabled
+
+
+        
+    }
+
+    #[test]
+    fn test_success() -> Result<()> {
+        const D: usize = 2;
+        type C = PoseidonGoldilocksConfig;
+        type F = <C as GenericConfig<D>>::F;
+
+        fn flag_test(flag: usize) -> Result<()> {
+            let config = CircuitConfig {
+                optimization_flags: flag,
+                ..CircuitConfig::standard_recursion_config()
+            };
+            let mut builder = CircuitBuilder::<F, D>::new(config.clone());
+
+            let mut pairs = Vec::new();
+            let gate = EqualityGate::new_from_config(&config);
+            let ref_gate = gate.clone();
+            let constants = [F::ONE];
+
+            for _ in 0..100 {
+                let x = builder.add_virtual_target();
+                let y = builder.add_virtual_target();
+                let output_value = builder.add_virtual_target();
+
+                let (gate_row, i) = builder.find_slot(gate.clone(), &constants, &constants);
+
+                let wire_x = Target::wire(gate_row, ref_gate.wire_ith_element_0(i));
+                let wire_y = Target::wire(gate_row, ref_gate.wire_ith_element_1(i));
+                let wire_equal = Target::wire(gate_row, ref_gate.wire_ith_output(i));
+
+                builder.connect(x, wire_x);
+                builder.connect(y, wire_y);
+                builder.connect(output_value, wire_equal);
+
+                pairs.push((x, y, output_value));
+
+            }
+
+            let circuit_data = builder.build::<C>();
+            let mut pw = PartialWitness::new();
+
+            for (i, (x, y, output_value)) in pairs.iter().enumerate() {
+                if i < 50 {
+                    let value = F::rand();
+                    pw.set_target(*x, value)?;
+                    pw.set_target(*y, value)?;
+                    let expected = F::ONE;
+
+                    pw.set_target(*output_value, expected)?;
+                } else {
+                    let value1 = F::rand();
+                    let mut value2 = F::rand();
+                        
+                    while value2 == value1 {
+                        value2 = F::rand();
+                    }
+            
+                    pw.set_target(*x, value1)?;
+                    pw.set_target(*y, value2)?;
+                    let expected = F::ZERO;
+                    pw.set_target(*output_value, expected)?;
+                }
+
+            }
+                
+            let proof = circuit_data.prove(pw)?;
+            circuit_data.verify(proof)?;
+
+            Ok(())
+        }
+
+        flag_test(63)?; // flag enabled
+        flag_test(55)?; // flag disabled
+
+        Ok(())
+        
     }
 }

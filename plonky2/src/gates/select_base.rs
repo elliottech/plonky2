@@ -280,6 +280,7 @@ mod tests {
     use crate::plonk::circuit_builder::CircuitBuilder;
     use crate::plonk::circuit_data::CircuitConfig;
     use crate::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
+    use plonky2_field::types::Sample;
 
     #[test]
     fn low_degree() {
@@ -331,5 +332,172 @@ mod tests {
         let proof = circuit_data.prove(pw)?;
         circuit_data.verify(proof)?;
         Ok(())
+    }
+
+    #[test]
+    fn test_success() -> Result<()> {
+        const D: usize = 2;
+        type C = PoseidonGoldilocksConfig;
+        type F = <C as GenericConfig<D>>::F;
+
+        fn flag_test(flag: usize) -> Result<()> {
+            let config = CircuitConfig {
+                optimization_flags: flag,
+                ..CircuitConfig::standard_recursion_config()
+            };
+            let mut builder = CircuitBuilder::<F, D>::new(config.clone());
+
+            let mut pairs = Vec::new();
+
+            let gate = SelectionGate::new_from_config(&config);
+            let ref_gate = gate.clone();
+
+            for _ in 0..100 {
+                let b = builder.add_virtual_bool_target_safe();
+                let x = builder.add_virtual_target();
+                let y = builder.add_virtual_target();
+
+                let (row, i) = builder.find_slot(gate.clone(), &[], &[]);
+
+                builder.connect(b.target, Target::wire(row, ref_gate.wire_ith_selector(i)));
+                builder.connect(x, Target::wire(row, ref_gate.wire_ith_element_0(i)));
+                builder.connect(y, Target::wire(row, ref_gate.wire_ith_element_1(i)));
+
+                let output = Target::wire(row, ref_gate.wire_ith_output(i));
+                let result = builder.add_virtual_target();
+                builder.connect(result, output);
+
+                pairs.push((b, x, y, result));
+            }
+
+            let circuit_data = builder.build::<C>();
+            let mut pw = PartialWitness::new();
+
+            for (i, (b, x, y, result)) in pairs.iter().enumerate() {
+                
+                if i < 50 {
+                    let x_val = F::rand();
+                    let y_val = F::rand();
+                    let b_val = true;
+                    let expected = x_val;
+
+                    pw.set_target(*x, x_val)?;
+                    pw.set_target(*y, y_val)?;
+                    pw.set_bool_target(*b, b_val)?;
+                    pw.set_target(*result, expected)?;
+                } else {
+                    let x_val = F::rand();
+                    let y_val = F::rand();
+                    let b_val = false;
+                    let expected = y_val;
+
+                    pw.set_target(*x, x_val)?;
+                    pw.set_target(*y, y_val)?;
+                    pw.set_bool_target(*b, b_val)?;
+                    pw.set_target(*result, expected)?;
+                }
+                
+            }
+
+            let proof = circuit_data.prove(pw)?;
+            circuit_data.verify(proof)?;
+
+            Ok(())
+
+
+        }
+    
+        flag_test(63)?; // flag enabled
+        flag_test(31)?; // flag disabled
+
+        Ok(())
+
+    }
+
+
+    #[test]
+    #[should_panic]
+    fn test_failure() {
+        const D: usize = 2;
+        type C = PoseidonGoldilocksConfig;
+        type F = <C as GenericConfig<D>>::F;
+
+        fn flag_test(flag: usize) {
+            let config = CircuitConfig {
+                optimization_flags: flag,
+                ..CircuitConfig::standard_recursion_config()
+            };
+            let mut builder = CircuitBuilder::<F, D>::new(config.clone());
+
+            let mut pairs = Vec::new();
+
+            let gate = SelectionGate::new_from_config(&config);
+            let ref_gate = gate.clone();
+
+            for _ in 0..100 {
+                let b = builder.add_virtual_bool_target_safe();
+                let x = builder.add_virtual_target();
+                let y = builder.add_virtual_target();
+
+                let (row, i) = builder.find_slot(gate.clone(), &[], &[]);
+
+                builder.connect(b.target, Target::wire(row, ref_gate.wire_ith_selector(i)));
+                builder.connect(x, Target::wire(row, ref_gate.wire_ith_element_0(i)));
+                builder.connect(y, Target::wire(row, ref_gate.wire_ith_element_1(i)));
+
+                let output = Target::wire(row, ref_gate.wire_ith_output(i));
+                let result = builder.add_virtual_target();
+                builder.connect(result, output);
+
+                pairs.push((b, x, y, result));
+            }
+
+            let circuit_data = builder.build::<C>();
+            let mut pw = PartialWitness::new();
+
+            for (i, (b, x, y, result)) in pairs.iter().enumerate() {
+                
+                if i < 50 {
+                    let x_val = F::rand();
+                    let y_val = F::rand();
+                    let b_val = true;
+                    let expected = x_val;
+                    let mut incorrect_value = F::rand();
+                    while incorrect_value == expected {
+                        incorrect_value = F::rand();
+                    }
+
+                    pw.set_target(*x, x_val).unwrap();
+                    pw.set_target(*y, y_val).unwrap();
+                    pw.set_bool_target(*b, b_val).unwrap();
+                    pw.set_target(*result, incorrect_value).unwrap();
+                } else {
+                    let x_val = F::rand();
+                    let y_val = F::rand();
+                    let b_val = false;
+                    let expected = y_val;
+                    let mut incorrect_value = F::rand();
+                    while incorrect_value == expected {
+                        incorrect_value = F::rand();
+                    }
+
+                    pw.set_target(*x, x_val).unwrap();
+                    pw.set_target(*y, y_val).unwrap();
+                    pw.set_bool_target(*b, b_val).unwrap();
+                    pw.set_target(*result, incorrect_value).unwrap();
+                }
+                
+            }
+
+            let proof = circuit_data.prove(pw).unwrap();
+            circuit_data.verify(proof).unwrap();
+
+
+
+        }
+    
+        flag_test(63); // flag enabled
+        flag_test(31); // flag disabled
+
     }
 }
