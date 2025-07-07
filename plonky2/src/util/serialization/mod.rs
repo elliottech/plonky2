@@ -662,6 +662,7 @@ pub trait Read {
         let use_base_arithmetic_gate = self.read_bool()?;
         let zero_knowledge = self.read_bool()?;
         let fri_config = self.read_fri_config()?;
+        let optimization_flags = self.read_usize()?;
 
         Ok(CircuitConfig {
             num_wires,
@@ -673,6 +674,7 @@ pub trait Read {
             use_base_arithmetic_gate,
             zero_knowledge,
             fri_config,
+            optimization_flags,
         })
     }
 
@@ -1697,6 +1699,7 @@ pub trait Write {
             use_base_arithmetic_gate,
             zero_knowledge,
             fri_config,
+            optimization_flags,
         } = config;
 
         self.write_usize(*num_wires)?;
@@ -1708,6 +1711,7 @@ pub trait Write {
         self.write_bool(*use_base_arithmetic_gate)?;
         self.write_bool(*zero_knowledge)?;
         self.write_fri_config(fri_config)?;
+        self.write_usize(*optimization_flags)?;
 
         Ok(())
     }

@@ -95,14 +95,17 @@ macro_rules! impl_gate_serializer {
 pub mod default {
     use plonky2_field::extension::Extendable;
 
+    use crate::gates::addition_base::AdditionGate;
     use crate::gates::arithmetic_base::ArithmeticGate;
     use crate::gates::arithmetic_extension::ArithmeticExtensionGate;
     use crate::gates::base_sum::BaseSumGate;
     use crate::gates::constant::ConstantGate;
     use crate::gates::coset_interpolation::CosetInterpolationGate;
+    use crate::gates::equality_base::EqualityGate;
     use crate::gates::exponentiation::ExponentiationGate;
     use crate::gates::lookup::LookupGate;
     use crate::gates::lookup_table::LookupTableGate;
+    use crate::gates::multiplication_base::MultiplicationGate;
     use crate::gates::multiplication_extension::MulExtensionGate;
     use crate::gates::noop::NoopGate;
     use crate::gates::poseidon::PoseidonGate;
@@ -128,14 +131,17 @@ pub mod default {
         impl_gate_serializer! {
             DefaultGateSerializer,
             ArithmeticGate,
+            AdditionGate,
             ArithmeticExtensionGate<D>,
             BaseSumGate<2>,
             ConstantGate,
             CosetInterpolationGate<F, D>,
+            EqualityGate,
             ExponentiationGate<F, D>,
             LookupGate,
             LookupTableGate,
             MulExtensionGate<D>,
+            MultiplicationGate,
             NoopGate,
             PoseidonMdsGate<F, D>,
             PoseidonGate<F, D>,
