@@ -241,13 +241,49 @@ impl<F: RichField + Extendable<D>, const D: usize> SimpleGenerator<F, D>
 
 #[cfg(test)]
 mod tests {
+    use core::marker::PhantomData;
     use anyhow::Result;
+    use std::fs;
 
     use crate::field::goldilocks_field::GoldilocksField;
+    use crate::field::types::Field;
     use crate::gates::addition_base::AdditionGate;
     use crate::gates::gate_testing::{test_eval_fns, test_low_degree};
-    use crate::plonk::circuit_data::CircuitConfig;
-    use crate::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
+    use crate::gates::arithmetic_base::ArithmeticBaseGenerator;
+    use crate::gates::poseidon::PoseidonGenerator;
+    use crate::gates::poseidon_mds::PoseidonMdsGenerator;
+    use crate::iop::generator::{ConstantGenerator, RandomValueGenerator};
+    use crate::iop::target::Target;
+    use crate::iop::witness::{PartialWitness, WitnessWrite};
+    use crate::plonk::circuit_builder::CircuitBuilder;
+    use crate::plonk::circuit_data::{CircuitConfig, CircuitData};
+    use crate::plonk::config::{AlgebraicHasher, GenericConfig, PoseidonGoldilocksConfig};
+    use crate::recursion::dummy_circuit::DummyProofGenerator;
+    use crate::util::serialization::{DefaultGateSerializer, WitnessGeneratorSerializer};
+    use crate::{get_generator_tag_impl, impl_generator_serializer, read_generator_impl};
+
+    #[derive(Default)]
+    pub struct AdditionTestGeneratorSerializer<C: GenericConfig<D>, const D: usize> {
+        pub _phantom: PhantomData<C>,
+    }
+
+    impl<F, C, const D: usize> WitnessGeneratorSerializer<F, D> for AdditionTestGeneratorSerializer<C, D>
+    where
+        F: crate::hash::hash_types::RichField + crate::field::extension::Extendable<D>,
+        C: GenericConfig<D, F = F> + 'static,
+        C::Hasher: AlgebraicHasher<F>,
+    {
+        impl_generator_serializer! {
+            AdditionTestGeneratorSerializer,
+            DummyProofGenerator<F, C, D>,
+            ArithmeticBaseGenerator<F, D>,
+            ConstantGenerator<F>,
+            PoseidonGenerator<F, D>,
+            PoseidonMdsGenerator<D>,
+            RandomValueGenerator,
+            crate::gates::addition_base::AdditionBaseGenerator<F, D>
+        }
+    }
 
     #[test]
     fn low_degree() {
@@ -262,5 +298,114 @@ mod tests {
         type F = <C as GenericConfig<D>>::F;
         let gate = AdditionGate::new_from_config(&CircuitConfig::standard_recursion_config());
         test_eval_fns::<F, C, _, D>(gate)
+    }
+
+    #[test]
+    fn test_circuit_serialization_deserialization() -> Result<()> {
+        const D: usize = 2;
+        type C = PoseidonGoldilocksConfig;
+        type F = <C as GenericConfig<D>>::F;
+
+        // Step 1: Build a circuit with AdditionGate
+        let config = CircuitConfig::standard_recursion_config();
+        let mut builder = CircuitBuilder::<F, D>::new(config.clone());
+
+        let gate = AdditionGate::new_from_config(&config);
+        let constants = [F::ONE, F::ONE];
+
+        // Create some addition operations
+        let mut test_targets = Vec::new();
+        for _ in 0..10 {
+            let x = builder.add_virtual_target();
+            let y = builder.add_virtual_target();
+            let output_value = builder.add_virtual_target();
+
+            let (gate_row, i) = builder.find_slot(gate.clone(), &constants, &constants);
+
+            let wire_x = Target::wire(gate_row, AdditionGate::wire_ith_addend_0(i));
+            let wire_y = Target::wire(gate_row, AdditionGate::wire_ith_addend_1(i));
+            let wire_output = Target::wire(gate_row, AdditionGate::wire_ith_output(i));
+
+            builder.connect(x, wire_x);
+            builder.connect(y, wire_y);
+            builder.connect(output_value, wire_output);
+
+            test_targets.push((x, y, output_value));
+        }
+
+        let circuit_data = builder.build::<C>();
+
+        // Step 2: Serialize circuit data to bytes and then to file
+        let filename = "test_addition_circuit.dat";
+        {
+            let gate_serializer = DefaultGateSerializer;
+            let generator_serializer = AdditionTestGeneratorSerializer::<C, D>::default();
+
+            let data_bytes = circuit_data
+                .to_bytes(&gate_serializer, &generator_serializer)
+                .map_err(|_| anyhow::Error::msg("CircuitData serialization failed."))?;
+
+            fs::write(filename, &data_bytes)?;
+        }
+
+        // Step 3: Deserialize circuit data from file
+        let deserialized_circuit_data = {
+            let gate_serializer = DefaultGateSerializer;
+            let generator_serializer = AdditionTestGeneratorSerializer::<C, D>::default();
+
+            let data_bytes = fs::read(filename)?;
+            CircuitData::<F, C, D>::from_bytes(
+                &data_bytes,
+                &gate_serializer,
+                &generator_serializer,
+            )
+            .map_err(|_| anyhow::Error::msg("CircuitData deserialization failed."))?
+        };
+
+        // Step 4: Verify the deserialized circuit works correctly
+        // Create witness data
+        let mut pw = PartialWitness::new();
+        
+        for (x, y, output_value) in &test_targets {
+            let value1 = F::from_canonical_u64(42);
+            let value2 = F::from_canonical_u64(58);
+            let expected = value1 + value2; // Since constants are both 1, this is just addition
+            
+            pw.set_target(*x, value1)?;
+            pw.set_target(*y, value2)?;
+            pw.set_target(*output_value, expected)?;
+        }
+
+        // Step 5: Generate proof with deserialized circuit
+        let proof = deserialized_circuit_data.prove(pw)?;
+        
+        // Step 6: Verify proof with deserialized circuit
+        deserialized_circuit_data.verify(proof)?;
+
+        // Step 7: Test that a new prover/verifier instance can use the deserialized data
+        let mut pw2 = PartialWitness::new();
+        for (x, y, output_value) in &test_targets {
+            let value1 = F::from_canonical_u64(100);
+            let value2 = F::from_canonical_u64(200);
+            let expected = value1 + value2;
+            
+            pw2.set_target(*x, value1)?;
+            pw2.set_target(*y, value2)?;
+            pw2.set_target(*output_value, expected)?;
+        }
+
+        let proof2 = deserialized_circuit_data.prove(pw2)?;
+        deserialized_circuit_data.verify(proof2)?;
+
+        // Clean up the test file
+        std::fs::remove_file(filename)?;
+
+        println!("✅ Circuit serialization/deserialization test passed!");
+        println!("   - Circuit with AdditionGate was successfully serialized to file");
+        println!("   - Circuit was successfully deserialized from file");
+        println!("   - Deserialized circuit can generate and verify proofs");
+        println!("   - Multiple proofs can be generated with the same deserialized circuit");
+
+        Ok(())
     }
 }
