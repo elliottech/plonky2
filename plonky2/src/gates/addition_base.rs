@@ -241,7 +241,6 @@ impl<F: RichField + Extendable<D>, const D: usize> SimpleGenerator<F, D>
 
 #[cfg(test)]
 mod tests {
-    use core::marker::PhantomData;
     use anyhow::Result;
     use std::fs;
 
@@ -249,41 +248,12 @@ mod tests {
     use crate::field::types::Field;
     use crate::gates::addition_base::AdditionGate;
     use crate::gates::gate_testing::{test_eval_fns, test_low_degree};
-    use crate::gates::arithmetic_base::ArithmeticBaseGenerator;
-    use crate::gates::poseidon::PoseidonGenerator;
-    use crate::gates::poseidon_mds::PoseidonMdsGenerator;
-    use crate::iop::generator::{ConstantGenerator, RandomValueGenerator};
     use crate::iop::target::Target;
     use crate::iop::witness::{PartialWitness, WitnessWrite};
     use crate::plonk::circuit_builder::CircuitBuilder;
     use crate::plonk::circuit_data::{CircuitConfig, CircuitData};
-    use crate::plonk::config::{AlgebraicHasher, GenericConfig, PoseidonGoldilocksConfig};
-    use crate::recursion::dummy_circuit::DummyProofGenerator;
-    use crate::util::serialization::{DefaultGateSerializer, WitnessGeneratorSerializer};
-    use crate::{get_generator_tag_impl, impl_generator_serializer, read_generator_impl};
-
-    #[derive(Default)]
-    pub struct AdditionTestGeneratorSerializer<C: GenericConfig<D>, const D: usize> {
-        pub _phantom: PhantomData<C>,
-    }
-
-    impl<F, C, const D: usize> WitnessGeneratorSerializer<F, D> for AdditionTestGeneratorSerializer<C, D>
-    where
-        F: crate::hash::hash_types::RichField + crate::field::extension::Extendable<D>,
-        C: GenericConfig<D, F = F> + 'static,
-        C::Hasher: AlgebraicHasher<F>,
-    {
-        impl_generator_serializer! {
-            AdditionTestGeneratorSerializer,
-            DummyProofGenerator<F, C, D>,
-            ArithmeticBaseGenerator<F, D>,
-            ConstantGenerator<F>,
-            PoseidonGenerator<F, D>,
-            PoseidonMdsGenerator<D>,
-            RandomValueGenerator,
-            crate::gates::addition_base::AdditionBaseGenerator<F, D>
-        }
-    }
+    use crate::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
+    use crate::util::serialization::{DefaultGateSerializer, DefaultGeneratorSerializer};
 
     #[test]
     fn low_degree() {
@@ -339,7 +309,7 @@ mod tests {
         let filename = "test_addition_circuit.dat";
         {
             let gate_serializer = DefaultGateSerializer;
-            let generator_serializer = AdditionTestGeneratorSerializer::<C, D>::default();
+            let generator_serializer = DefaultGeneratorSerializer::<C, D>::default();
 
             let data_bytes = circuit_data
                 .to_bytes(&gate_serializer, &generator_serializer)
@@ -351,7 +321,7 @@ mod tests {
         // Step 3: Deserialize circuit data from file
         let deserialized_circuit_data = {
             let gate_serializer = DefaultGateSerializer;
-            let generator_serializer = AdditionTestGeneratorSerializer::<C, D>::default();
+            let generator_serializer = DefaultGeneratorSerializer::<C, D>::default();
 
             let data_bytes = fs::read(filename)?;
             CircuitData::<F, C, D>::from_bytes(
