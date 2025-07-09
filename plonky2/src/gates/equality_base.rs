@@ -296,6 +296,9 @@ mod tests {
     use crate::plonk::circuit_data::CircuitConfig;
     use crate::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
     use plonky2_field::types::Sample;
+    use crate::util::serialization::DefaultGateSerializer;
+    use crate::util::serialization::DefaultGeneratorSerializer;
+    use crate::plonk::circuit_data::CircuitData;
 
     #[test]
     fn low_degree() {
@@ -511,4 +514,94 @@ mod tests {
         Ok(())
         
     }
+
+    #[test]
+    fn test_serialization_equality() -> Result<()> {
+        const D: usize = 2;
+        type C = PoseidonGoldilocksConfig;
+        type F = <C as GenericConfig<D>>::F;
+
+        let config = CircuitConfig::standard_recursion_config();
+        let mut builder = CircuitBuilder::<F, D>::new(config.clone());
+
+        let mut pairs = Vec::new();
+
+        let gate = EqualityGate::new_from_config(&config);
+        let ref_gate = gate.clone();
+        let constants = [F::ONE];
+
+
+        for _ in 0..100 {
+            let x = builder.add_virtual_target();
+            let y = builder.add_virtual_target();
+            let output_value = builder.add_virtual_target();
+
+            let (gate_row, i) = builder.find_slot(gate.clone(), &constants, &constants);
+
+            let wire_x = Target::wire(gate_row, ref_gate.wire_ith_element_0(i));
+            let wire_y = Target::wire(gate_row, ref_gate.wire_ith_element_1(i));
+            let wire_equal = Target::wire(gate_row, ref_gate.wire_ith_output(i));
+
+            builder.connect(x, wire_x);
+            builder.connect(y, wire_y);
+            builder.connect(output_value, wire_equal);
+
+            pairs.push((x, y, output_value));
+
+        }
+
+        let circuit_data = builder.build::<C>();
+        let gate_serializer = DefaultGateSerializer;
+        let generator_serializer = DefaultGeneratorSerializer::<C, D>::default();
+
+        let data_bytes = circuit_data
+                .to_bytes(&gate_serializer, &generator_serializer)
+                .map_err(|_| anyhow::Error::msg("Serialization failed."))?;
+
+
+        let deserialized_circuit_data = CircuitData::<F, C, D>::from_bytes(
+            &data_bytes,
+            &gate_serializer,
+            &generator_serializer,
+        )
+        .map_err(|_| anyhow::Error::msg("Deserialization failed."))?;
+
+        assert_eq!(
+            deserialized_circuit_data, circuit_data
+        );
+
+        let mut pw = PartialWitness::new();
+
+        for (i, (x, y, output_value)) in pairs.iter().enumerate() {
+            if i < 50 {
+                let value = F::rand();
+                pw.set_target(*x, value)?;
+                pw.set_target(*y, value)?;
+                let expected = F::ONE;
+
+                pw.set_target(*output_value, expected)?;
+            } else {
+                let value1 = F::rand();
+                let mut value2 = F::rand();
+                    
+                while value2 == value1 {
+                    value2 = F::rand();
+                }
+        
+                pw.set_target(*x, value1)?;
+                pw.set_target(*y, value2)?;
+                let expected = F::ZERO;
+                pw.set_target(*output_value, expected)?;
+            }
+
+        }
+            
+        let proof = circuit_data.prove(pw.clone())?;
+        circuit_data.verify(proof.clone())?;
+
+        Ok(())
+
+    }
+
+
 }

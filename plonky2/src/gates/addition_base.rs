@@ -255,6 +255,9 @@ mod tests {
     use crate::plonk::circuit_builder::CircuitBuilder;
     use crate::plonk::circuit_data::CircuitConfig;
     use crate::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
+    use crate::util::serialization::DefaultGateSerializer;
+    use crate::util::serialization::DefaultGeneratorSerializer;
+    use crate::plonk::circuit_data::CircuitData;
 
     #[test]
     fn low_degree() {
@@ -394,5 +397,83 @@ mod tests {
 
 
     }
+
+
+    #[test]
+    fn test_serialization_addition() -> Result<()> {
+    const D: usize = 2;
+    type C = PoseidonGoldilocksConfig;
+    type F = <C as GenericConfig<D>>::F;
+
+
+    let config = CircuitConfig::standard_recursion_config();
+    let mut builder = CircuitBuilder::<F, D>::new(config.clone());
+
+    let mut pairs = Vec::new();
+
+    let gate = AdditionGate::new_from_config(&config);
+    let constants = [F::ONE, F::ONE];
+
+    for _ in 0..100 {
+        let x = builder.add_virtual_target();
+        let y = builder.add_virtual_target();
+        let output_value = builder.add_virtual_target();
+
+        let (gate_row, i) = builder.find_slot(gate.clone(), &constants, &constants);
+
+        let wire_x = Target::wire(gate_row, AdditionGate::wire_ith_addend_0(i));
+        let wire_y = Target::wire(gate_row, AdditionGate::wire_ith_addend_1(i));
+        let wire_output = Target::wire(gate_row, AdditionGate::wire_ith_output(i));
+
+        builder.connect(x, wire_x);
+        builder.connect(y, wire_y);
+        builder.connect(output_value, wire_output);
+
+        pairs.push((x, y, output_value));
+    }
+
+    let circuit_data = builder.build::<C>();
+    // let filename = "test_circuit";
+    let gate_serializer = DefaultGateSerializer;
+    let generator_serializer = DefaultGeneratorSerializer::<C, D>::default();
+
+    let data_bytes = circuit_data
+            .to_bytes(&gate_serializer, &generator_serializer)
+            .map_err(|_| anyhow::Error::msg("Serialization failed."))?;
+
+    // fs::write(filename, &data_bytes)?;
+
+    // let read_data_bytes = fs::read(filename)?;
+
+    let deserialized_circuit_data = CircuitData::<F, C, D>::from_bytes(
+        &data_bytes,
+        &gate_serializer,
+        &generator_serializer,
+    )
+    .map_err(|_| anyhow::Error::msg("Deserialization failed."))?;
+
+    assert_eq!(
+        deserialized_circuit_data, circuit_data
+    );
+
+    let mut pw = PartialWitness::new();
+    
+    for (x, y, output_value) in pairs.iter() {
+        let value1 = F::rand();
+        let value2 = F::rand();
+        let expected = value1 + value2;
+        
+        pw.set_target(*x, value1)?;
+        pw.set_target(*y, value2)?;
+        pw.set_target(*output_value, expected)?;
+    }
+
+    let proof = deserialized_circuit_data.prove(pw.clone())?;
+    deserialized_circuit_data.verify(proof.clone())?;
+
+    // std::fs::remove_file(filename)?;
+
+    Ok(())
+}
 
 }
