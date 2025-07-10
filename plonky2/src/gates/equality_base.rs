@@ -283,6 +283,7 @@ impl<F: RichField + Extendable<D>, const D: usize> SimpleGenerator<F, D>
 #[cfg(test)]
 mod tests {
     use anyhow::Result;
+    use plonky2_field::types::Sample;
 
     use crate::field::goldilocks_field::GoldilocksField;
     use crate::field::types::Field;
@@ -293,12 +294,9 @@ mod tests {
     use crate::iop::target::{BoolTarget, Target};
     use crate::iop::witness::{PartialWitness, WitnessWrite};
     use crate::plonk::circuit_builder::CircuitBuilder;
-    use crate::plonk::circuit_data::CircuitConfig;
+    use crate::plonk::circuit_data::{CircuitConfig, CircuitData};
     use crate::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
-    use plonky2_field::types::Sample;
-    use crate::util::serialization::DefaultGateSerializer;
-    use crate::util::serialization::DefaultGeneratorSerializer;
-    use crate::plonk::circuit_data::CircuitData;
+    use crate::util::serialization::{DefaultGateSerializer, DefaultGeneratorSerializer};
 
     #[test]
     fn low_degree() {
@@ -361,7 +359,6 @@ mod tests {
         Ok(())
     }
 
-    
     #[test]
     #[should_panic]
     fn test_failure() {
@@ -376,7 +373,7 @@ mod tests {
             };
             let mut builder = CircuitBuilder::<F, D>::new(config.clone());
 
-            let mut pairs = Vec::new();
+            let mut pairs = vec![];
             let gate = EqualityGate::new_from_config(&config);
             let ref_gate = gate.clone();
             let constants = [F::ONE];
@@ -397,7 +394,6 @@ mod tests {
                 builder.connect(output_value, wire_equal);
 
                 pairs.push((x, y, output_value));
-
             }
 
             let circuit_data = builder.build::<C>();
@@ -413,29 +409,24 @@ mod tests {
                 } else {
                     let value1 = F::rand();
                     let mut value2 = F::rand();
-                        
+
                     while value2 == value1 {
                         value2 = F::rand();
                     }
-            
+
                     pw.set_target(*x, value1).unwrap();
                     pw.set_target(*y, value2).unwrap();
                     let incorrect_value = F::ONE;
                     pw.set_target(*output_value, incorrect_value).unwrap();
                 }
-
             }
-                
+
             let proof = circuit_data.prove(pw).unwrap();
             circuit_data.verify(proof).unwrap();
-
         }
 
         flag_test(63); // flag enabled
         flag_test(55); // flag disabled
-
-
-        
     }
 
     #[test]
@@ -451,7 +442,7 @@ mod tests {
             };
             let mut builder = CircuitBuilder::<F, D>::new(config.clone());
 
-            let mut pairs = Vec::new();
+            let mut pairs = vec![];
             let gate = EqualityGate::new_from_config(&config);
             let ref_gate = gate.clone();
             let constants = [F::ONE];
@@ -472,7 +463,6 @@ mod tests {
                 builder.connect(output_value, wire_equal);
 
                 pairs.push((x, y, output_value));
-
             }
 
             let circuit_data = builder.build::<C>();
@@ -489,19 +479,18 @@ mod tests {
                 } else {
                     let value1 = F::rand();
                     let mut value2 = F::rand();
-                        
+
                     while value2 == value1 {
                         value2 = F::rand();
                     }
-            
+
                     pw.set_target(*x, value1)?;
                     pw.set_target(*y, value2)?;
                     let expected = F::ZERO;
                     pw.set_target(*output_value, expected)?;
                 }
-
             }
-                
+
             let proof = circuit_data.prove(pw)?;
             circuit_data.verify(proof)?;
 
@@ -512,7 +501,6 @@ mod tests {
         flag_test(55)?; // flag disabled
 
         Ok(())
-        
     }
 
     #[test]
@@ -524,12 +512,11 @@ mod tests {
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::<F, D>::new(config.clone());
 
-        let mut pairs = Vec::new();
+        let mut pairs = vec![];
 
         let gate = EqualityGate::new_from_config(&config);
         let ref_gate = gate.clone();
         let constants = [F::ONE];
-
 
         for _ in 0..100 {
             let x = builder.add_virtual_target();
@@ -547,7 +534,6 @@ mod tests {
             builder.connect(output_value, wire_equal);
 
             pairs.push((x, y, output_value));
-
         }
 
         let circuit_data = builder.build::<C>();
@@ -555,9 +541,8 @@ mod tests {
         let generator_serializer = DefaultGeneratorSerializer::<C, D>::default();
 
         let data_bytes = circuit_data
-                .to_bytes(&gate_serializer, &generator_serializer)
-                .map_err(|_| anyhow::Error::msg("Serialization failed."))?;
-
+            .to_bytes(&gate_serializer, &generator_serializer)
+            .map_err(|_| anyhow::Error::msg("Serialization failed."))?;
 
         let deserialized_circuit_data = CircuitData::<F, C, D>::from_bytes(
             &data_bytes,
@@ -566,9 +551,7 @@ mod tests {
         )
         .map_err(|_| anyhow::Error::msg("Deserialization failed."))?;
 
-        assert_eq!(
-            deserialized_circuit_data, circuit_data
-        );
+        assert_eq!(deserialized_circuit_data, circuit_data);
 
         let mut pw = PartialWitness::new();
 
@@ -583,25 +566,21 @@ mod tests {
             } else {
                 let value1 = F::rand();
                 let mut value2 = F::rand();
-                    
+
                 while value2 == value1 {
                     value2 = F::rand();
                 }
-        
+
                 pw.set_target(*x, value1)?;
                 pw.set_target(*y, value2)?;
                 let expected = F::ZERO;
                 pw.set_target(*output_value, expected)?;
             }
-
         }
-            
+
         let proof = circuit_data.prove(pw.clone())?;
         circuit_data.verify(proof.clone())?;
 
         Ok(())
-
     }
-
-
 }

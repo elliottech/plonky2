@@ -268,6 +268,7 @@ impl<F: RichField + Extendable<D>, const D: usize> SimpleGenerator<F, D>
 #[cfg(test)]
 mod tests {
     use anyhow::Result;
+    use plonky2_field::types::Sample;
 
     use crate::field::goldilocks_field::GoldilocksField;
     use crate::field::types::Field;
@@ -278,13 +279,9 @@ mod tests {
     use crate::iop::target::Target;
     use crate::iop::witness::{PartialWitness, WitnessWrite};
     use crate::plonk::circuit_builder::CircuitBuilder;
-    use crate::plonk::circuit_data::CircuitConfig;
+    use crate::plonk::circuit_data::{CircuitConfig, CircuitData};
     use crate::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
-    use plonky2_field::types::Sample;
-    use crate::util::serialization::DefaultGeneratorSerializer;
-    use crate::plonk::circuit_data::CircuitData;
-    use crate::util::serialization::DefaultGateSerializer;
-
+    use crate::util::serialization::{DefaultGateSerializer, DefaultGeneratorSerializer};
 
     #[test]
     fn low_degree() {
@@ -351,7 +348,7 @@ mod tests {
             };
             let mut builder = CircuitBuilder::<F, D>::new(config.clone());
 
-            let mut pairs = Vec::new();
+            let mut pairs = vec![];
 
             let gate = SelectionGate::new_from_config(&config);
             let ref_gate = gate.clone();
@@ -378,7 +375,6 @@ mod tests {
             let mut pw = PartialWitness::new();
 
             for (i, (b, x, y, result)) in pairs.iter().enumerate() {
-                
                 if i < 50 {
                     let x_val = F::rand();
                     let y_val = F::rand();
@@ -400,24 +396,19 @@ mod tests {
                     pw.set_bool_target(*b, b_val)?;
                     pw.set_target(*result, expected)?;
                 }
-                
             }
 
             let proof = circuit_data.prove(pw)?;
             circuit_data.verify(proof)?;
 
             Ok(())
-
-
         }
-    
+
         flag_test(63)?; // flag enabled
         flag_test(31)?; // flag disabled
 
         Ok(())
-
     }
-
 
     #[test]
     #[should_panic]
@@ -433,7 +424,7 @@ mod tests {
             };
             let mut builder = CircuitBuilder::<F, D>::new(config.clone());
 
-            let mut pairs = Vec::new();
+            let mut pairs = vec![];
 
             let gate = SelectionGate::new_from_config(&config);
             let ref_gate = gate.clone();
@@ -460,7 +451,6 @@ mod tests {
             let mut pw = PartialWitness::new();
 
             for (i, (b, x, y, result)) in pairs.iter().enumerate() {
-                
                 if i < 50 {
                     let x_val = F::rand();
                     let y_val = F::rand();
@@ -490,19 +480,14 @@ mod tests {
                     pw.set_bool_target(*b, b_val).unwrap();
                     pw.set_target(*result, incorrect_value).unwrap();
                 }
-                
             }
 
             let proof = circuit_data.prove(pw).unwrap();
             circuit_data.verify(proof).unwrap();
-
-
-
         }
-    
+
         flag_test(63); // flag enabled
         flag_test(31); // flag disabled
-
     }
 
     #[test]
@@ -514,7 +499,7 @@ mod tests {
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::<F, D>::new(config.clone());
 
-        let mut pairs = Vec::new();
+        let mut pairs = vec![];
 
         let gate = SelectionGate::new_from_config(&config);
         let ref_gate = gate.clone();
@@ -552,14 +537,11 @@ mod tests {
         )
         .map_err(|_| anyhow::Error::msg("Deserialization failed."))?;
 
-        assert_eq!(
-            deserialized_circuit_data, circuit_data
-        );
+        assert_eq!(deserialized_circuit_data, circuit_data);
 
         let mut pw = PartialWitness::new();
 
         for (i, (b, x, y, result)) in pairs.iter().enumerate() {
-                
             if i < 50 {
                 let x_val = F::rand();
                 let y_val = F::rand();
@@ -581,15 +563,11 @@ mod tests {
                 pw.set_bool_target(*b, b_val)?;
                 pw.set_target(*result, expected)?;
             }
-            
         }
 
         let proof = deserialized_circuit_data.prove(pw.clone())?;
         deserialized_circuit_data.verify(proof.clone())?;
-    
+
         Ok(())
-
     }
-
-
 }

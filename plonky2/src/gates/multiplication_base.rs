@@ -237,17 +237,14 @@ mod tests {
     use crate::field::types::Field;
     #[allow(unused_imports)]
     use crate::field::types::Field64;
-    use crate::gates::multiplication_base::MultiplicationGate;
     use crate::gates::gate_testing::{test_eval_fns, test_low_degree};
+    use crate::gates::multiplication_base::MultiplicationGate;
     use crate::iop::target::Target;
     use crate::iop::witness::{PartialWitness, WitnessWrite};
     use crate::plonk::circuit_builder::CircuitBuilder;
-    use crate::plonk::circuit_data::CircuitConfig;
+    use crate::plonk::circuit_data::{CircuitConfig, CircuitData};
     use crate::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
-    use crate::util::serialization::DefaultGeneratorSerializer;
-    use crate::plonk::circuit_data::CircuitData;
-    use crate::util::serialization::DefaultGateSerializer;
-
+    use crate::util::serialization::{DefaultGateSerializer, DefaultGeneratorSerializer};
 
     #[test]
     fn low_degree() {
@@ -277,7 +274,7 @@ mod tests {
             };
             let mut builder = CircuitBuilder::<F, D>::new(config.clone());
 
-            let mut pairs = Vec::new();
+            let mut pairs = vec![];
 
             let gate = MultiplicationGate::new_from_config(&config);
             let constants = [F::ONE];
@@ -297,13 +294,13 @@ mod tests {
                 builder.connect(y, wire_y);
                 builder.connect(output_value, wire_output);
 
-                pairs.push((x,y, output_value));
+                pairs.push((x, y, output_value));
             }
-    
+
             let circuit_data = builder.build::<C>();
 
             let mut pw = PartialWitness::new();
-            for (_, (x,y, output_value)) in pairs.iter().enumerate() {
+            for (x, y, output_value) in pairs.iter() {
                 let value1 = F::rand();
                 let value2 = F::rand();
                 let expected = value1 * value2;
@@ -316,31 +313,29 @@ mod tests {
             circuit_data.verify(proof)?;
 
             Ok(())
-
         }
-        
+
         flag_test(63)?; // flag enabled
         flag_test(61)?; // flag disabled
 
         Ok(())
     }
 
-
     #[test]
     #[should_panic]
-    fn test_failure()  {
+    fn test_failure() {
         const D: usize = 2;
         type C = PoseidonGoldilocksConfig;
         type F = <C as GenericConfig<D>>::F;
 
-        fn flag_test(flag: usize)  {
+        fn flag_test(flag: usize) {
             let config = CircuitConfig {
                 optimization_flags: flag,
                 ..CircuitConfig::standard_recursion_config()
             };
             let mut builder = CircuitBuilder::<F, D>::new(config.clone());
 
-            let mut pairs = Vec::new();
+            let mut pairs = vec![];
 
             let gate = MultiplicationGate::new_from_config(&config);
             let constants = [F::ONE];
@@ -360,13 +355,13 @@ mod tests {
                 builder.connect(y, wire_y);
                 builder.connect(output_value, wire_output);
 
-                pairs.push((x,y, output_value));
+                pairs.push((x, y, output_value));
             }
-    
+
             let circuit_data = builder.build::<C>();
 
             let mut pw = PartialWitness::new();
-            for (_, (x,y, output_value)) in pairs.iter().enumerate() {
+            for (x, y, output_value) in pairs.iter() {
                 let value1 = F::rand();
                 let value2 = F::rand();
                 let expected = value1 * value2;
@@ -379,18 +374,12 @@ mod tests {
                 pw.set_target(*output_value, incorrect_value).unwrap();
             }
 
-            
             let proof = circuit_data.prove(pw).unwrap();
             circuit_data.verify(proof).unwrap();
-
-
-
         }
-        
+
         flag_test(63); // flag enabled
         flag_test(61); // flag disabled
-
-
     }
 
     #[test]
@@ -402,7 +391,7 @@ mod tests {
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::<F, D>::new(config.clone());
 
-        let mut pairs = Vec::new();
+        let mut pairs = vec![];
 
         let gate = MultiplicationGate::new_from_config(&config);
         let constants = [F::ONE];
@@ -422,7 +411,7 @@ mod tests {
             builder.connect(y, wire_y);
             builder.connect(output_value, wire_output);
 
-            pairs.push((x,y, output_value));
+            pairs.push((x, y, output_value));
         }
 
         let circuit_data = builder.build::<C>();
@@ -440,9 +429,7 @@ mod tests {
         )
         .map_err(|_| anyhow::Error::msg("Deserialization failed."))?;
 
-        assert_eq!(
-            deserialized_circuit_data, circuit_data
-        );
+        assert_eq!(deserialized_circuit_data, circuit_data);
 
         let mut pw = PartialWitness::new();
 
@@ -450,16 +437,15 @@ mod tests {
             let value1 = F::rand();
             let value2 = F::rand();
             let expected = value1 * value2;
-            
+
             pw.set_target(*x, value1)?;
             pw.set_target(*y, value2)?;
             pw.set_target(*output_value, expected)?;
         }
-    
+
         let proof = deserialized_circuit_data.prove(pw)?;
         deserialized_circuit_data.verify(proof)?;
-    
-        Ok(())
 
+        Ok(())
     }
 }
