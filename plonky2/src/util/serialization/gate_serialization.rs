@@ -115,6 +115,7 @@ pub mod default {
     use crate::gates::random_access::RandomAccessGate;
     use crate::gates::reducing::ReducingGate;
     use crate::gates::reducing_extension::ReducingExtensionGate;
+    use crate::gates::select_base::SelectionGate;
     use crate::hash::hash_types::RichField;
     use crate::util::serialization::GateSerializer;
     /// A gate serializer that can be used to serialize all default gates supported
@@ -149,7 +150,8 @@ pub mod default {
             PublicInputGate,
             RandomAccessGate<F, D>,
             ReducingExtensionGate<D>,
-            ReducingGate<D>
+            ReducingGate<D>,
+            SelectionGate
         }
     }
 }
