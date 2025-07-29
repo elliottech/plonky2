@@ -23,15 +23,18 @@
 
 // Gates have `new` methods that return `GateRef`s.
 
+pub mod addition_base;
 pub mod arithmetic_base;
 pub mod arithmetic_extension;
 pub mod base_sum;
 pub mod constant;
 pub mod coset_interpolation;
+pub mod equality_base;
 pub mod exponentiation;
 pub mod gate;
 pub mod lookup;
 pub mod lookup_table;
+pub mod multiplication_base;
 pub mod multiplication_extension;
 pub mod noop;
 pub mod packed_util;
@@ -41,6 +44,7 @@ pub mod public_input;
 pub mod random_access;
 pub mod reducing;
 pub mod reducing_extension;
+pub mod select_base;
 pub(crate) mod selectors;
 pub mod util;
 
