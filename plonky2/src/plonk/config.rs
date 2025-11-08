@@ -20,6 +20,7 @@ use crate::hash::hash_types::{HashOut, RichField};
 use crate::hash::hashing::PlonkyPermutation;
 use crate::hash::keccak::KeccakHash;
 use crate::hash::poseidon::PoseidonHash;
+use crate::hash::poseidon2::Poseidon2Hash;
 use crate::iop::target::{BoolTarget, Target};
 use crate::plonk::circuit_builder::CircuitBuilder;
 
@@ -122,5 +123,18 @@ impl GenericConfig<2> for KeccakGoldilocksConfig {
     type F = GoldilocksField;
     type FE = QuadraticExtension<Self::F>;
     type Hasher = KeccakHash<25>;
+    type InnerHasher = PoseidonHash;
+}
+
+/// Configuration using Poseidon2 for Merkle trees and Poseidon for in-circuit hashing over the Goldilocks field.
+/// This is a hybrid configuration that uses the newer Poseidon2 hash function for external commitments
+/// (Merkle tree construction) while using the original Poseidon for internal algebraic hashing (circuit constraints).
+/// This provides better performance for Merkle trees while maintaining compatibility with existing circuit gates.
+#[derive(Debug, Copy, Clone, Default, Eq, PartialEq, Serialize)]
+pub struct Poseidon2GoldilocksConfig;
+impl GenericConfig<2> for Poseidon2GoldilocksConfig {
+    type F = GoldilocksField;
+    type FE = QuadraticExtension<Self::F>;
+    type Hasher = Poseidon2Hash;
     type InnerHasher = PoseidonHash;
 }

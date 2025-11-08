@@ -2,12 +2,13 @@ use core::arch::x86_64::*;
 
 use super::goldilocks_avx2::{add_avx, add_avx_a_sc, mult_avx};
 /// Code taken and adapted from: https://github.com/0xPolygonHermez/goldilocks/blob/master/src/goldilocks_base_field_avx.hpp
-use crate::hash::{hash_types::RichField, poseidon2::RC12, poseidon2::SPONGE_WIDTH};
+use crate::field::types::Field;
+use crate::hash::{poseidon2::RC12, poseidon2::SPONGE_WIDTH};
 
 #[inline(always)]
 pub fn add_rc_avx<F>(state: &mut [F; SPONGE_WIDTH], rc: &[u64; SPONGE_WIDTH])
 where
-    F: RichField,
+    F: Field,
 {
     unsafe {
         let s0 = _mm256_loadu_si256((&state[0..4]).as_ptr().cast::<__m256i>());
@@ -31,7 +32,7 @@ where
 #[inline]
 fn sbox_p<F>(input: &F) -> F
 where
-    F: RichField,
+    F: Field,
 {
     let x2 = (*input) * (*input);
     let x4 = x2 * x2;
@@ -42,7 +43,7 @@ where
 #[inline(always)]
 fn apply_m_4_avx<F>(x: &__m256i, s: &[F]) -> __m256i
 where
-    F: RichField,
+    F: Field,
 {
     // This is based on apply_m_4, but we pack 4 and then 2 operands per operation
     unsafe {
@@ -77,7 +78,7 @@ pub fn matmul_internal_avx<F>(
     state: &mut [F; SPONGE_WIDTH],
     mat_internal_diag_m_1: [u64; SPONGE_WIDTH],
 ) where
-    F: RichField,
+    F: Field,
 {
     /*
     let mut sum = state[0];
@@ -117,8 +118,9 @@ pub fn matmul_internal_avx<F>(
 #[inline(always)]
 pub fn permute_mut_avx<F>(state: &mut [F; SPONGE_WIDTH])
 where
-    F: RichField,
+    F: Field,
 {
+    // println!("poseidon2 use avx2");
     unsafe {
         let s0 = _mm256_loadu_si256((&state[0..4]).as_ptr().cast::<__m256i>());
         let s1 = _mm256_loadu_si256((&state[4..8]).as_ptr().cast::<__m256i>());
@@ -153,7 +155,7 @@ pub fn internal_layer_avx<F>(
     r_beg: usize,
     r_end: usize,
 ) where
-    F: RichField,
+    F: Field,
 {
     unsafe {
         // The internal rounds.

@@ -14,6 +14,7 @@ use super::arch::x86_64::poseidon2_goldilocks_avx2::{
 };
 use super::hash_types::NUM_HASH_OUT_ELTS;
 use crate::field::extension::Extendable;
+use crate::field::types::Field;
 use crate::hash::hash_types::{HashOut, RichField};
 use crate::hash::hashing::PlonkyPermutation;
 use crate::iop::target::{BoolTarget, Target};
@@ -329,7 +330,7 @@ pub struct Poseidon2MEMatrix;
 // This uses the formula from the start of Appendix B, with multiplications unrolled into additions.
 pub fn apply_m_4<F>(x: &mut [F])
 where
-    F: RichField,
+    F: Field,
 {
     let t0 = x[0].clone() + x[1].clone();
     let t1 = x[2].clone() + x[3].clone();
@@ -357,7 +358,7 @@ trait P2Permutation<T: Clone>: Clone + Sync {
 
 impl<F> P2Permutation<[F; SPONGE_WIDTH]> for Poseidon2MEMatrix
 where
-    F: RichField,
+    F: Field,
 {
     #[cfg(not(target_feature = "avx2"))]
     fn permute_mut(&self, state: &mut [F; SPONGE_WIDTH]) {
@@ -393,7 +394,7 @@ where
 #[derive(Debug, Clone, Default)]
 struct DiffusionMatrixGoldilocks;
 
-pub fn matmul_internal<F: RichField>(
+pub fn matmul_internal<F: Field>(
     state: &mut [F; SPONGE_WIDTH],
     mat_internal_diag_m_1: [u64; SPONGE_WIDTH],
 ) {
@@ -404,7 +405,7 @@ pub fn matmul_internal<F: RichField>(
     }
 }
 
-impl<F: RichField> P2Permutation<[F; 12]> for DiffusionMatrixGoldilocks {
+impl<F: Field> P2Permutation<[F; 12]> for DiffusionMatrixGoldilocks {
     #[cfg(not(target_feature = "avx2"))]
     fn permute_mut(&self, state: &mut [F; 12]) {
         matmul_internal::<F>(state, MATRIX_DIAG_12_GOLDILOCKS);
@@ -416,7 +417,7 @@ impl<F: RichField> P2Permutation<[F; 12]> for DiffusionMatrixGoldilocks {
     }
 }
 
-pub trait Poseidon2: RichField {
+pub trait Poseidon2: Field {
     // const WIDTH: usize = 12;
     // const D: u64 = 7;
     const ROUNDS_F: usize = 8;
@@ -425,7 +426,7 @@ pub trait Poseidon2: RichField {
     #[inline]
     fn add_rc<F>(state: &mut [F; SPONGE_WIDTH], rc: &[u64; SPONGE_WIDTH])
     where
-        F: RichField,
+        F: Field,
     {
         for i in 0..SPONGE_WIDTH {
             state[i] = state[i] + F::from_canonical_u64(rc[i]);
@@ -435,7 +436,7 @@ pub trait Poseidon2: RichField {
     #[inline]
     fn sbox_p<F>(input: &F) -> F
     where
-        F: RichField,
+        F: Field,
     {
         // this is inefficient, so we change to the one below
         // input.exp_u64(7)
@@ -448,7 +449,7 @@ pub trait Poseidon2: RichField {
     #[inline]
     fn sbox<F>(state: &mut [F; SPONGE_WIDTH])
     where
-        F: RichField,
+        F: Field,
     {
         for i in 0..SPONGE_WIDTH {
             state[i] = Self::sbox_p(&state[i]);
@@ -594,10 +595,13 @@ impl<T: Copy + Debug + Default + Eq + Permuter2 + Send + Sync> PlonkyPermutation
 
 impl Poseidon2 for GoldilocksField {}
 
-/// Poseidon hash function.
+/// Poseidon2 hash function.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct Poseidon2Hash;
-impl<F: RichField + Poseidon2> Hasher<F> for Poseidon2Hash {
+impl<F: Field + Poseidon2> Hasher<F> for Poseidon2Hash
+where
+    F: RichField,
+{
     const HASH_SIZE: usize = 4 * 8;
     type Hash = HashOut<F>;
     type Permutation = Poseidon2Permutation<F>;
@@ -633,7 +637,10 @@ impl<F: RichField + Poseidon2> Hasher<F> for Poseidon2Hash {
     }
 }
 
-impl<F: RichField + Poseidon2> AlgebraicHasher<F> for Poseidon2Hash {
+impl<F: Field + Poseidon2> AlgebraicHasher<F> for Poseidon2Hash
+where
+    F: RichField,
+{
     type AlgebraicPermutation = Poseidon2Permutation<Target>;
 
     fn permute_swapped<const D: usize>(
