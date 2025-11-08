@@ -324,11 +324,11 @@ extern crate alloc;
 // [ 1 1 4 6 ].
 // The permutation calculation is based on Appendix B from the Poseidon2 paper.
 #[derive(Copy, Clone, Default, Debug)]
-pub struct Poseidon2MEMatrix;
+pub(crate) struct Poseidon2MEMatrix;
 
 // Multiply a 4-element vector x by M_4, in place.
 // This uses the formula from the start of Appendix B, with multiplications unrolled into additions.
-pub fn apply_m_4<F>(x: &mut [F])
+pub(crate) fn apply_m_4<F>(x: &mut [F])
 where
     F: Field,
 {
@@ -346,7 +346,7 @@ where
     x[3] = t4;
 }
 
-trait P2Permutation<T: Clone>: Clone + Sync {
+pub(crate) trait P2Permutation<T: Clone>: Clone + Sync {
     #[allow(dead_code)]
     fn permute(&self, mut input: T) -> T {
         self.permute_mut(&mut input);
@@ -394,7 +394,7 @@ where
 #[derive(Debug, Clone, Default)]
 struct DiffusionMatrixGoldilocks;
 
-pub fn matmul_internal<F: Field>(
+pub(crate) fn matmul_internal<F: Field>(
     state: &mut [F; SPONGE_WIDTH],
     mat_internal_diag_m_1: [u64; SPONGE_WIDTH],
 ) {
@@ -417,11 +417,15 @@ impl<F: Field> P2Permutation<[F; 12]> for DiffusionMatrixGoldilocks {
     }
 }
 
+pub const ROUNDS_F: usize = 8;
+pub const ROUNDS_P: usize = 22;
+pub const HALF_N_ROUNDS_F: usize = ROUNDS_F / 2;
+
 pub trait Poseidon2: Field {
     // const WIDTH: usize = 12;
     // const D: u64 = 7;
-    const ROUNDS_F: usize = 8;
-    const ROUNDS_P: usize = 22;
+    const ROUNDS_F: usize = ROUNDS_F;
+    const ROUNDS_P: usize = ROUNDS_P;
 
     #[inline]
     fn add_rc<F>(state: &mut [F; SPONGE_WIDTH], rc: &[u64; SPONGE_WIDTH])
@@ -644,14 +648,32 @@ where
     type AlgebraicPermutation = Poseidon2Permutation<Target>;
 
     fn permute_swapped<const D: usize>(
-        _inputs: Self::AlgebraicPermutation,
-        _swap: BoolTarget,
-        _builder: &mut CircuitBuilder<F, D>,
+        inputs: Self::AlgebraicPermutation,
+        swap: BoolTarget,
+        builder: &mut CircuitBuilder<F, D>,
     ) -> Self::AlgebraicPermutation
     where
         F: RichField + Extendable<D>,
     {
-        todo!()
+        let gate_type = crate::gates::poseidon2::Poseidon2Gate::<F, D>::new();
+        let gate = builder.add_gate(gate_type, vec![]);
+
+        let swap_wire = crate::gates::poseidon2::Poseidon2Gate::<F, D>::WIRE_SWAP;
+        let swap_wire = Target::wire(gate, swap_wire);
+        builder.connect(swap.target, swap_wire);
+
+        // Route input wires.
+        let inputs = inputs.as_ref();
+        for i in 0..SPONGE_WIDTH {
+            let in_wire = crate::gates::poseidon2::Poseidon2Gate::<F, D>::wire_input(i);
+            let in_wire = Target::wire(gate, in_wire);
+            builder.connect(inputs[i], in_wire);
+        }
+
+        // Collect output wires.
+        Self::AlgebraicPermutation::new(
+            (0..SPONGE_WIDTH).map(|i| Target::wire(gate, crate::gates::poseidon2::Poseidon2Gate::<F, D>::wire_output(i))),
+        )
     }
 }
 

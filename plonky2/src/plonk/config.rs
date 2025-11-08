@@ -112,8 +112,8 @@ pub struct PoseidonGoldilocksConfig;
 impl GenericConfig<2> for PoseidonGoldilocksConfig {
     type F = GoldilocksField;
     type FE = QuadraticExtension<Self::F>;
-    type Hasher = PoseidonHash;
-    type InnerHasher = PoseidonHash;
+    type Hasher = Poseidon2Hash;
+    type InnerHasher = Poseidon2Hash;
 }
 
 /// Configuration using truncated Keccak over the Goldilocks field.
@@ -136,5 +136,5 @@ impl GenericConfig<2> for Poseidon2GoldilocksConfig {
     type F = GoldilocksField;
     type FE = QuadraticExtension<Self::F>;
     type Hasher = Poseidon2Hash;
-    type InnerHasher = PoseidonHash;
+    type InnerHasher = Poseidon2Hash;
 }
