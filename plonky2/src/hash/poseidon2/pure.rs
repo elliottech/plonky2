@@ -1,6 +1,5 @@
 #![allow(clippy::all)]
 
-use p3_goldilocks::Goldilocks;
 use plonky2_field::goldilocks_field::GoldilocksField;
 
 /// This is a test implementation of the Poseidon2 permutation without any gate or generator optimizations.
