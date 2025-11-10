@@ -20,6 +20,7 @@ use crate::hash::hash_types::{HashOut, RichField};
 use crate::hash::hashing::PlonkyPermutation;
 use crate::hash::keccak::KeccakHash;
 use crate::hash::poseidon::PoseidonHash;
+use crate::hash::poseidon2::hash::Poseidon2Hash;
 use crate::iop::target::{BoolTarget, Target};
 use crate::plonk::circuit_builder::CircuitBuilder;
 
@@ -111,8 +112,8 @@ pub struct PoseidonGoldilocksConfig;
 impl GenericConfig<2> for PoseidonGoldilocksConfig {
     type F = GoldilocksField;
     type FE = QuadraticExtension<Self::F>;
-    type Hasher = PoseidonHash;
-    type InnerHasher = PoseidonHash;
+    type Hasher = Poseidon2Hash;
+    type InnerHasher = Poseidon2Hash;
 }
 
 /// Configuration using truncated Keccak over the Goldilocks field.

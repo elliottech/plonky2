@@ -38,6 +38,11 @@ plonky2_field = { version = "1.0.0", path = "../field", default-features = false
 plonky2_maybe_rayon = { version = "1.0.0", path = "../maybe_rayon", default-features = false }
 plonky2_util = { version = "1.0.0", path = "../util", default-features = false }
 
+# Plonky3 dependencies for Poseidon2
+p3-poseidon2 = { git = "https://github.com/Plonky3/Plonky3.git", rev = "eeb4e37b20127c4daa871b2bad0df30a7c7380db" }
+p3-goldilocks = { git = "https://github.com/Plonky3/Plonky3.git", rev = "eeb4e37b20127c4daa871b2bad0df30a7c7380db" }
+p3-field = { git = "https://github.com/Plonky3/Plonky3.git", rev = "eeb4e37b20127c4daa871b2bad0df30a7c7380db" }
+p3-symmetric = { git = "https://github.com/Plonky3/Plonky3.git", rev = "eeb4e37b20127c4daa871b2bad0df30a7c7380db" }
 
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
 getrandom = { version = "0.2", default-features = false, features = ["js"] }
@@ -60,29 +65,29 @@ jemallocator = "0.5.0"
 name = "generate_constants"
 required-features = ["rand_chacha"]
 
-[[bench]]
-name = "field_arithmetic"
-harness = false
+# [[bench]]
+# name = "field_arithmetic"
+# harness = false
 
-[[bench]]
-name = "ffts"
-harness = false
+# [[bench]]
+# name = "ffts"
+# harness = false
 
 [[bench]]
 name = "hashing"
 harness = false
 
-[[bench]]
-name = "merkle"
-harness = false
+# [[bench]]
+# name = "merkle"
+# harness = false
 
-[[bench]]
-name = "transpose"
-harness = false
+# [[bench]]
+# name = "transpose"
+# harness = false
 
-[[bench]]
-name = "reverse_index_bits"
-harness = false
+# [[bench]]
+# name = "reverse_index_bits"
+# harness = false
 
 # Display math equations properly in documentation
 [package.metadata.docs.rs]
