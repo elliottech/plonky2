@@ -106,7 +106,6 @@ pub trait GenericConfig<const D: usize>:
     type InnerHasher: AlgebraicHasher<Self::F>;
 }
 
-
 /// Configuration using Poseidon over the Goldilocks field.
 #[derive(Debug, Copy, Clone, Default, Eq, PartialEq, Serialize)]
 pub struct PoseidonGoldilocksConfig;
@@ -116,7 +115,6 @@ impl GenericConfig<2> for PoseidonGoldilocksConfig {
     type Hasher = PoseidonHash;
     type InnerHasher = PoseidonHash;
 }
-
 
 /// Configuration using Poseidon over the Goldilocks field.
 #[derive(Debug, Copy, Clone, Default, Eq, PartialEq, Serialize)]

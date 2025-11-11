@@ -1,9 +1,8 @@
-
 use std::time::Instant;
 
+use anyhow::Result;
 use env_logger;
 use log::Level;
-use anyhow::Result;
 use plonky2::field::types::Field;
 use plonky2::iop::witness::{PartialWitness, WitnessWrite};
 use plonky2::plonk::circuit_builder::CircuitBuilder;
@@ -23,7 +22,6 @@ fn main() -> Result<()> {
     work::<Poseidon2GoldilocksConfig>()
 }
 
-
 fn work<C: GenericConfig<2>>() -> Result<()> {
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;
@@ -37,7 +35,7 @@ fn work<C: GenericConfig<2>>() -> Result<()> {
     let initial_b = builder.add_virtual_target();
     let mut prev_target = initial_a;
     let mut cur_target = initial_b;
-    for _ in 0..9999 {
+    for _ in 0..99999 {
         let temp = builder.add(prev_target, cur_target);
         prev_target = cur_target;
         cur_target = temp;
@@ -64,7 +62,7 @@ fn work<C: GenericConfig<2>>() -> Result<()> {
 
     // Print the timing tree
     timing.print();
-    
+
     println!(
         "100th Fibonacci number mod |F| (starting with {}, {}) is: {}",
         proof.public_inputs[0], proof.public_inputs[1], proof.public_inputs[2]
