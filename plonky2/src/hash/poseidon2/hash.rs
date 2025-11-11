@@ -1,5 +1,7 @@
 use core::fmt::Debug;
 
+use super::config::*;
+use super::gate::Poseidon2Gate;
 use crate::field::extension::{Extendable, FieldExtension};
 use crate::field::goldilocks_field::GoldilocksField as F;
 use crate::field::types::{Field, PrimeField64};
@@ -9,11 +11,6 @@ use crate::iop::ext_target::ExtensionTarget;
 use crate::iop::target::{BoolTarget, Target};
 use crate::plonk::circuit_builder::CircuitBuilder;
 use crate::plonk::config::{AlgebraicHasher, Hasher};
-
-use super::config::*;
-use super::gate::Poseidon2Gate;
-
-
 
 pub trait Poseidon2: PrimeField64 {
     fn poseidon2(input: [Self; WIDTH]) -> [Self; WIDTH] {

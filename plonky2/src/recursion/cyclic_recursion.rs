@@ -209,7 +209,7 @@ mod tests {
     use crate::gates::noop::NoopGate;
     use crate::hash::hash_types::{HashOutTarget, RichField};
     use crate::hash::hashing::hash_n_to_hash_no_pad;
-    use crate::hash::poseidon::{PoseidonHash, PoseidonPermutation};
+    use crate::hash::poseidon2::hash::{Poseidon2, Poseidon2Hash, Poseidon2Permutation};
     use crate::iop::witness::{PartialWitness, WitnessWrite};
     use crate::plonk::circuit_builder::CircuitBuilder;
     use crate::plonk::circuit_data::{CircuitConfig, CommonCircuitData};
@@ -270,7 +270,7 @@ mod tests {
         builder.register_public_inputs(&initial_hash_target.elements);
         let current_hash_in = builder.add_virtual_hash();
         let current_hash_out =
-            builder.hash_n_to_hash_no_pad::<PoseidonHash>(current_hash_in.elements.to_vec());
+            builder.hash_n_to_hash_no_pad::<Poseidon2Hash>(current_hash_in.elements.to_vec());
         builder.register_public_inputs(&current_hash_out.elements);
         let counter = builder.add_virtual_public_input();
 
@@ -368,10 +368,10 @@ mod tests {
         cyclic_circuit_data.verify(proof)
     }
 
-    fn iterate_poseidon<F: RichField>(initial_state: [F; 4], n: usize) -> [F; 4] {
+    fn iterate_poseidon<F: RichField + Poseidon2>(initial_state: [F; 4], n: usize) -> [F; 4] {
         let mut current = initial_state;
         for _ in 0..n {
-            current = hash_n_to_hash_no_pad::<F, PoseidonPermutation<F>>(&current).elements;
+            current = hash_n_to_hash_no_pad::<F, Poseidon2Permutation<F>>(&current).elements;
         }
         current
     }

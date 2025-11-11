@@ -2,12 +2,11 @@
 
 use plonky2_field::goldilocks_field::GoldilocksField;
 
+use super::config::*;
 /// This is a test implementation of the Poseidon2 permutation without any gate or generator optimizations.
 use crate::field::types::Field;
 use crate::iop::target::Target;
 use crate::plonk::circuit_builder::CircuitBuilder;
-
-use super::config::*;
 
 type F = GoldilocksField;
 type Builder = CircuitBuilder<F, 2>;
