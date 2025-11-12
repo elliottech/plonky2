@@ -35,10 +35,7 @@ pub(crate) fn bench_poseidon<F: Poseidon>(c: &mut Criterion) {
 
 pub(crate) fn bench_poseidon2<F: Poseidon2>(c: &mut Criterion) {
     c.bench_function(
-        &format!(
-            "poseidon2<{}, {SPONGE_WIDTH}>",
-            type_name::<F>()
-        ),
+        &format!("poseidon2<{}, {SPONGE_WIDTH}>", type_name::<F>()),
         |b| {
             b.iter_batched(
                 || F::rand_array::<SPONGE_WIDTH>(),

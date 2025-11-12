@@ -156,8 +156,17 @@ impl Field for GoldilocksField {
         Self(n)
     }
 
+    #[inline(always)]
+    fn from_canonical_u64_unchecked(n: u64) -> Self {
+        Self(n)
+    }
+
     fn from_noncanonical_u96((n_lo, n_hi): (u64, u32)) -> Self {
         reduce96((n_lo, n_hi))
+    }
+
+    fn from_noncanonical_u128_with_96_bits(n: u128) -> Self {
+        reduce128_with_96_bits(n)
     }
 
     fn from_noncanonical_u128(n: u128) -> Self {
@@ -392,6 +401,14 @@ const unsafe fn add_no_canonicalize_trashing_input(x: u64, y: u64) -> u64 {
 #[inline]
 fn reduce96((x_lo, x_hi): (u64, u32)) -> GoldilocksField {
     let t1 = x_hi as u64 * EPSILON;
+    let t2 = unsafe { add_no_canonicalize_trashing_input(x_lo, t1) };
+    GoldilocksField(t2)
+}
+
+#[inline]
+fn reduce128_with_96_bits(x: u128) -> GoldilocksField {
+    let (x_lo, x_hi) = split(x); // This is a no-op
+    let t1 = x_hi * EPSILON;
     let t2 = unsafe { add_no_canonicalize_trashing_input(x_lo, t1) };
     GoldilocksField(t2)
 }

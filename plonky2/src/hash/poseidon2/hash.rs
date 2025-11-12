@@ -1,4 +1,5 @@
 use core::fmt::Debug;
+use core::mem::transmute;
 
 use super::config::*;
 use super::gate::Poseidon2Gate;
@@ -37,7 +38,7 @@ pub trait Poseidon2: PrimeField64 {
     #[inline]
     fn partial_rounds(state: &mut [Self; WIDTH]) {
         for r in 0..ROUNDS_P {
-            state[0] += Self::from_canonical_u64(INTERNAL_CONSTANTS[r]);
+            state[0] += Self::from_canonical_u64_unchecked(INTERNAL_CONSTANTS[r]);
             state[0] = Self::sbox_p(&state[0]);
             Self::internal_linear_layer(state);
         }
@@ -95,8 +96,9 @@ pub trait Poseidon2: PrimeField64 {
     fn internal_linear_layer(state: &mut [Self; WIDTH]) {
         let sum: Self = state.iter().cloned().sum();
         for i in 0..WIDTH {
-            state[i] *= Self::from_canonical_u64(MATRIX_DIAG_12_U64[i]);
-            state[i] += sum;
+            state[i] = sum.multiply_accumulate(state[i], Self::from_canonical_u64_unchecked(MATRIX_DIAG_12_U64[i]));
+            // state[i] *= Self::from_canonical_u64_unchecked(MATRIX_DIAG_12_U64[i]);
+            // state[i] += sum;
         }
     }
 
@@ -109,8 +111,13 @@ pub trait Poseidon2: PrimeField64 {
             sum += state[i];
         }
         for i in 0..WIDTH {
-            state[i] *= F::from_canonical_u64(MATRIX_DIAG_12_U64[i]);
-            state[i] += sum;
+            state[i] = sum.multiply_accumulate(
+                state[i],
+                F::from_canonical_u64_unchecked(MATRIX_DIAG_12_U64[i]),
+            );
+
+            // state[i] *= F::from_canonical_u64_unchecked(MATRIX_DIAG_12_U64[i]);
+            // state[i] += sum;
         }
     }
 
@@ -120,7 +127,7 @@ pub trait Poseidon2: PrimeField64 {
 
         for i in 0..WIDTH {
             unsafe {
-                state[i] = state[i].add_canonical_u64(EXTERNAL_CONSTANTS[external_round][i]);
+                state[i] += state[i].add_canonical_u64(EXTERNAL_CONSTANTS[external_round][i]);
             }
         }
     }
@@ -133,7 +140,7 @@ pub trait Poseidon2: PrimeField64 {
         debug_assert!(external_round < EXTERNAL_CONSTANTS.len());
 
         for i in 0..WIDTH {
-            state[i] += F::from_canonical_u64(EXTERNAL_CONSTANTS[external_round][i]);
+            state[i] += F::from_canonical_u64_unchecked(EXTERNAL_CONSTANTS[external_round][i]);
         }
     }
 
@@ -153,7 +160,10 @@ pub trait Poseidon2: PrimeField64 {
 
     #[inline]
     fn sbox_p(a: &Self) -> Self {
-        a.exp_u64(D)
+        let a2 = a.square();
+        let a4 = a2.square();
+        let a3 = *a * a2;
+        a3 * a4
     }
 
     #[inline]
@@ -235,7 +245,7 @@ pub trait Poseidon2: PrimeField64 {
     ) where
         Self: RichField + Extendable<D>,
     {
-        let two = builder.constant_extension(Self::Extension::from_canonical_u64(2));
+        let two = builder.constant_extension(Self::Extension::from_canonical_u64_unchecked(2));
 
         let t01 = builder.add_extension(x[0], x[1]);
         let t23 = builder.add_extension(x[2], x[3]);
@@ -287,7 +297,7 @@ pub trait Poseidon2: PrimeField64 {
     {
         for i in 0..WIDTH {
             let round_constant =
-                Self::Extension::from_canonical_u64(EXTERNAL_CONSTANTS[rc_index][i]);
+                Self::Extension::from_canonical_u64_unchecked(EXTERNAL_CONSTANTS[rc_index][i]);
             let round_constant = builder.constant_extension(round_constant);
             input[i] = builder.add_extension(input[i], round_constant);
         }
@@ -327,7 +337,7 @@ pub trait Poseidon2: PrimeField64 {
         ]);
 
         for i in 0..WIDTH {
-            let round_constant = Self::Extension::from_canonical_u64(MATRIX_DIAG_12_U64[i]);
+            let round_constant = Self::Extension::from_canonical_u64_unchecked(MATRIX_DIAG_12_U64[i]);
             let round_constant = builder.constant_extension(round_constant);
 
             input[i] = builder.mul_add_extension(round_constant, input[i], sum);
@@ -499,7 +509,7 @@ mod test {
 
         let input_f = input
             .iter()
-            .map(|&x| F::from_canonical_u64((x as u64) + 1073741824))
+            .map(|&x| F::from_canonical_u64_unchecked((x as u64) + 1073741824))
             .collect::<Vec<F>>();
         let expected_output_f = hash_n_to_m_no_pad::<F, Poseidon2Permutation<F>>(&input_f, 12);
 
@@ -524,7 +534,7 @@ mod test {
         let input: [u32; 12] = core::array::from_fn(|_| rng.next_u32());
         let input_f = input
             .iter()
-            .map(|&x| F::from_canonical_u64((x as u64) + 1073741824))
+            .map(|&x| F::from_canonical_u64_unchecked((x as u64) + 1073741824))
             .collect::<Vec<F>>();
 
         let expected_output = hash_n_to_m_no_pad::<F, Poseidon2Permutation<F>>(&input_f[0..8], 4);
