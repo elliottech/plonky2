@@ -206,6 +206,7 @@ mod tests {
 
     use crate::field::extension::Extendable;
     use crate::field::types::{Field, PrimeField64};
+    use crate::gates::constant::ConstantGate;
     use crate::gates::noop::NoopGate;
     use crate::hash::hash_types::{HashOutTarget, RichField};
     use crate::hash::hashing::hash_n_to_hash_no_pad;
@@ -213,7 +214,7 @@ mod tests {
     use crate::iop::witness::{PartialWitness, WitnessWrite};
     use crate::plonk::circuit_builder::CircuitBuilder;
     use crate::plonk::circuit_data::{CircuitConfig, CommonCircuitData};
-    use crate::plonk::config::{AlgebraicHasher, GenericConfig, PoseidonGoldilocksConfig};
+    use crate::plonk::config::{AlgebraicHasher, GenericConfig, Poseidon2GoldilocksConfig};
     use crate::recursion::cyclic_recursion::check_cyclic_proof_verifier_data;
     use crate::recursion::dummy_circuit::cyclic_base_proof;
 
@@ -243,6 +244,14 @@ mod tests {
         let verifier_data =
             builder.add_virtual_verifier_data(data.common.config.fri_config.cap_height);
         builder.verify_proof::<C>(&proof, &verifier_data, &data.common);
+        // Add a constant to ensure ConstantGate is included in the gate set
+        // This matches what the actual cyclic recursion circuit will do
+        builder.add_gate(
+            ConstantGate {
+                num_consts: builder.config.num_constants,
+            },
+            vec![],
+        );
         while builder.num_gates() < 1 << 12 {
             builder.add_gate(NoopGate, vec![]);
         }
@@ -258,7 +267,7 @@ mod tests {
     #[test]
     fn test_cyclic_recursion() -> Result<()> {
         const D: usize = 2;
-        type C = PoseidonGoldilocksConfig;
+        type C = Poseidon2GoldilocksConfig;
         type F = <C as GenericConfig<D>>::F;
 
         let config = CircuitConfig::standard_recursion_config();
