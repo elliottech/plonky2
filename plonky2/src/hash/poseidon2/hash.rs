@@ -1,5 +1,7 @@
 use core::fmt::Debug;
 
+use plonky2_field::ops::Square;
+
 use super::config::*;
 use super::gate::Poseidon2Gate;
 use crate::field::extension::{Extendable, FieldExtension};
@@ -149,22 +151,9 @@ pub trait Poseidon2: PrimeField64 {
             .for_each(|a| *a = Self::sbox_p_extension(a));
     }
 
-    #[inline]
-    fn sbox_p(a: &Self) -> Self {
-        let a2 = a.square();
-        let a4 = a2.square();
-        let a3 = *a * a2;
-        a3 * a4
-    }
+    fn sbox_p(a: &Self) -> Self;
 
-    #[inline]
-    fn sbox_p_extension<F: FieldExtension<D, BaseField = Self>, const D: usize>(a: &F) -> F {
-        debug_assert!(D == 7);
-        let a2 = a.square();
-        let a4 = a2.square();
-        let a3 = *a * a2;
-        a3 * a4
-    }
+    fn sbox_p_extension<F: FieldExtension<D, BaseField = Self>, const D: usize>(a: &F) -> F;
 
     // Multiply a 4-element vector x by:
     // [ 2 3 1 1 ]
@@ -354,6 +343,22 @@ pub trait Poseidon2: PrimeField64 {
 }
 
 impl Poseidon2 for F {
+    #[inline]
+    fn sbox_p(a: &Self) -> Self {
+        let a2 = a.square();
+        let a4 = a2.square();
+        let a3 = *a * a2;
+        a3 * a4
+    }
+
+    #[inline]
+    fn sbox_p_extension<F: FieldExtension<D, BaseField = Self>, const D: usize>(a: &F) -> F {
+        let a2 = a.square();
+        let a4 = a2.square();
+        let a3 = *a * a2;
+        a3 * a4
+    }
+
     #[inline]
     #[cfg(not(all(target_arch = "aarch64", target_feature = "neon")))]
     fn add_rc(state: &mut [Self; WIDTH], external_round: usize) {
