@@ -90,10 +90,6 @@ where
 pub fn dummy_circuit<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>(
     common_data: &CommonCircuitData<F, D>,
 ) -> CircuitData<F, C, D> {
-    println!(
-        "dummy_circuit received common_data.gates: {:?}",
-        common_data.gates
-    );
     let config = common_data.config.clone();
     assert!(
         !common_data.config.zero_knowledge,
@@ -118,47 +114,6 @@ pub fn dummy_circuit<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, c
 
     let circuit = builder.build::<C>();
 
-    // Assert individual components to identify mismatches
-    assert_eq!(circuit.common.config, common_data.config, "config mismatch");
-    assert_eq!(
-        circuit.common.fri_params, common_data.fri_params,
-        "fri_params mismatch"
-    );
-    assert_eq!(circuit.common.gates, common_data.gates, "gates mismatch");
-    assert_eq!(
-        circuit.common.selectors_info, common_data.selectors_info,
-        "selectors_info mismatch"
-    );
-    assert_eq!(
-        circuit.common.quotient_degree_factor, common_data.quotient_degree_factor,
-        "quotient_degree_factor mismatch"
-    );
-    assert_eq!(
-        circuit.common.num_gate_constraints, common_data.num_gate_constraints,
-        "num_gate_constraints mismatch"
-    );
-    assert_eq!(
-        circuit.common.num_constants, common_data.num_constants,
-        "num_constants mismatch"
-    );
-    assert_eq!(
-        circuit.common.num_public_inputs, common_data.num_public_inputs,
-        "num_public_inputs mismatch"
-    );
-    assert_eq!(circuit.common.k_is, common_data.k_is, "k_is mismatch");
-    assert_eq!(
-        circuit.common.num_partial_products, common_data.num_partial_products,
-        "num_partial_products mismatch"
-    );
-    assert_eq!(
-        circuit.common.num_lookup_polys, common_data.num_lookup_polys,
-        "num_lookup_polys mismatch"
-    );
-    assert_eq!(
-        circuit.common.num_lookup_selectors, common_data.num_lookup_selectors,
-        "num_lookup_selectors mismatch"
-    );
-    assert_eq!(circuit.common.luts, common_data.luts, "luts mismatch");
     assert_eq!(&circuit.common, common_data);
     circuit
 }
