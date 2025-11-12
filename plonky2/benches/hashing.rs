@@ -1,21 +1,18 @@
 mod allocator;
 
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
+use p3_field::AbstractField;
+use p3_goldilocks::{DiffusionMatrixGoldilocks, Goldilocks};
+use p3_poseidon2::{Poseidon2 as P3Poseidon2, Poseidon2ExternalMatrixGeneral};
+use p3_symmetric::Permutation;
 use plonky2::field::goldilocks_field::GoldilocksField;
-use plonky2::field::types::{Field, Sample};
+use plonky2::field::types::Sample;
 use plonky2::hash::hash_types::{BytesHash, RichField};
 use plonky2::hash::keccak::KeccakHash;
 use plonky2::hash::poseidon::{Poseidon, SPONGE_WIDTH};
 use plonky2::hash::poseidon2::hash::Poseidon2;
 use plonky2::plonk::config::Hasher;
 use tynm::type_name;
-
-use p3_field::AbstractField;
-use p3_goldilocks::{DiffusionMatrixGoldilocks, Goldilocks};
-use p3_poseidon2::{Poseidon2 as P3Poseidon2, Poseidon2ExternalMatrixGeneral};
-use p3_symmetric::Permutation;
-
-use circuit::poseidon2::hash::Poseidon2 as LighterPoseidon2;
 
 pub(crate) fn bench_keccak<F: RichField>(c: &mut Criterion) {
     c.bench_function("keccak256", |b| {
@@ -112,31 +109,10 @@ pub(crate) fn bench_p3_poseidon2(c: &mut Criterion) {
     });
 }
 
-pub(crate) fn bench_circuit_poseidon2(c: &mut Criterion) {
-    const WIDTH: usize = 12;
-
-    c.bench_function("lighter's poseidon2", |b| {
-        b.iter_batched(
-            || {
-                let mut state = [GoldilocksField::ZERO; WIDTH];
-                for i in 0..WIDTH {
-                    state[i] = GoldilocksField::from_canonical_u64(rand::random::<u64>());
-                }
-                state
-            },
-            |state| {
-                <GoldilocksField as LighterPoseidon2>::poseidon2(state)
-            },
-            BatchSize::SmallInput,
-        )
-    });
-}
-
 fn criterion_benchmark(c: &mut Criterion) {
     bench_poseidon::<GoldilocksField>(c);
     bench_poseidon2::<GoldilocksField>(c);
     bench_p3_poseidon2(c);
-    bench_circuit_poseidon2(c);
     bench_keccak::<GoldilocksField>(c);
 }
 

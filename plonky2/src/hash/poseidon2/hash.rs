@@ -1,5 +1,4 @@
 use core::fmt::Debug;
-use core::mem::transmute;
 
 use super::config::*;
 use super::gate::Poseidon2Gate;
@@ -49,7 +48,7 @@ pub trait Poseidon2: PrimeField64 {
 
     #[inline]
     #[unroll::unroll_for_loops]
-    fn external_linear_layer(state: &mut [Self; WIDTH]){
+    fn external_linear_layer(state: &mut [Self; WIDTH]) {
         // First, we apply M_4 to each consecutive four elements of the state.
         // In Appendix B's terminology, this replaces each x_i with x_i'.
         for i in (0..WIDTH).step_by(4) {
@@ -64,7 +63,6 @@ pub trait Poseidon2: PrimeField64 {
         let sums: [Self; 4] =
             core::array::from_fn(|k| (0..WIDTH).step_by(4).map(|j| state[j + k]).sum::<Self>());
 
-      
         // The formula for each y_i involves 2x_i' term and x_j' terms for each j that equals i mod 4.
         // In other words, we can add a single copy of x_i' to the appropriate one of our precomputed sums
         for i in 0..WIDTH {
