@@ -1,4 +1,5 @@
 use core::fmt::Debug;
+use core::mem::transmute;
 
 use super::config::*;
 use super::gate::Poseidon2Gate;
@@ -48,7 +49,7 @@ pub trait Poseidon2: PrimeField64 {
 
     #[inline]
     #[unroll::unroll_for_loops]
-    fn external_linear_layer(state: &mut [Self; WIDTH]) {
+    fn external_linear_layer(state: &mut [Self; WIDTH]){
         // First, we apply M_4 to each consecutive four elements of the state.
         // In Appendix B's terminology, this replaces each x_i with x_i'.
         for i in (0..WIDTH).step_by(4) {
@@ -63,11 +64,12 @@ pub trait Poseidon2: PrimeField64 {
         let sums: [Self; 4] =
             core::array::from_fn(|k| (0..WIDTH).step_by(4).map(|j| state[j + k]).sum::<Self>());
 
+      
         // The formula for each y_i involves 2x_i' term and x_j' terms for each j that equals i mod 4.
         // In other words, we can add a single copy of x_i' to the appropriate one of our precomputed sums
-        state.iter_mut().enumerate().for_each(|(i, x)| {
-            *x += sums[i % 4];
-        });
+        for i in 0..WIDTH {
+            state[i] += sums[i % 4];
+        }
     }
 
     #[inline]
@@ -96,7 +98,19 @@ pub trait Poseidon2: PrimeField64 {
         }
     }
 
-    fn internal_linear_layer(state: &mut [Self; WIDTH]);
+    #[inline]
+    #[unroll::unroll_for_loops]
+    fn internal_linear_layer(state: &mut [Self; WIDTH]) {
+        let tmp = state
+            .iter()
+            .map(|&x| x.to_noncanonical_u64() as u128)
+            .sum::<u128>();
+        let sum = Self::from_noncanonical_u128_with_96_bits(tmp);
+        for i in 0..WIDTH {
+            state[i] =
+                sum.multiply_accumulate(state[i], Self::from_canonical_u64(MATRIX_DIAG_12_U64[i]));
+        }
+    }
 
     #[inline]
     fn internal_linear_layer_extension<F: FieldExtension<D, BaseField = Self>, const D: usize>(
@@ -355,71 +369,21 @@ impl Poseidon2 for F {
     }
 
     #[inline]
-    #[unroll::unroll_for_loops]
     #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
     fn add_rc(state: &mut [Self; WIDTH], external_round: usize) {
         debug_assert!(external_round < EXTERNAL_CONSTANTS.len());
 
         unsafe {
-            use core::arch::aarch64::*;
             use core::mem::transmute;
 
-            let mut state_u64 = transmute::<[Self; WIDTH], [u64; WIDTH]>(*state);
+            use crate::hash::arch::aarch64::poseidon_goldilocks_neon::vector_add;
+
+            let state_u64 = transmute::<[Self; WIDTH], [u64; WIDTH]>(*state);
             let round_constants = &EXTERNAL_CONSTANTS[external_round];
 
-            // Process 2 elements at a time using NEON
-            for i in (0..WIDTH).step_by(2) {
-                let state_vec = vld1q_u64(state_u64[i..].as_ptr());
-                let rc_vec = vld1q_u64(round_constants[i..].as_ptr());
-
-                // Add the round constants
-                let sum = vaddq_u64(state_vec, rc_vec);
-
-                // Check for overflow (if sum < state_vec, we wrapped around)
-                let overflow_mask = vcltq_u64(sum, state_vec);
-
-                // Add EPSILON (0xffffffff) where overflow occurred
-                let epsilon = vdupq_n_u64(0xffffffff);
-                let adjustment = vandq_u64(overflow_mask, epsilon);
-                let result = vaddq_u64(sum, adjustment);
-
-                vst1q_u64(state_u64[i..].as_mut_ptr(), result);
-            }
-            *state = transmute::<[u64; WIDTH], [Self; WIDTH]>(state_u64);
+            let res = vector_add(&state_u64, round_constants);
+            *state = transmute::<[u64; WIDTH], [Self; WIDTH]>(res);
         }
-    }
-
-    #[inline]
-    #[cfg(not(all(target_arch = "aarch64", target_feature = "neon")))]
-    fn internal_linear_layer(state: &mut [Self; WIDTH]) {
-        let tmp = state
-            .iter()
-            .map(|&x| x.to_noncanonical_u64() as u128)
-            .sum::<u128>();
-        let sum = Self::from_noncanonical_u128_with_96_bits(tmp);
-        state
-            .iter_mut()
-            .zip(MATRIX_DIAG_12_U64.iter())
-            .for_each(|(x, &m)| {
-                *x = sum.multiply_accumulate(*x, Self::from_canonical_u64(m));
-            });
-    }
-
-    #[inline]
-    #[unroll::unroll_for_loops]
-    #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
-    fn internal_linear_layer(state: &mut [Self; WIDTH]) {
-        let tmp = state
-            .iter()
-            .map(|&x| x.to_noncanonical_u64() as u128)
-            .sum::<u128>();
-        let sum = Self::from_noncanonical_u128_with_96_bits(tmp);
-        state
-            .iter_mut()
-            .zip(MATRIX_DIAG_12_U64.iter())
-            .for_each(|(x, &m)| {
-                *x = sum.multiply_accumulate(*x, Self::from_canonical_u64(m));
-            });
     }
 
     #[inline]
