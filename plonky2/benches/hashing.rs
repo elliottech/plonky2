@@ -95,9 +95,9 @@ pub(crate) fn bench_p3_poseidon2(c: &mut Criterion) {
         b.iter_batched(
             || {
                 let mut state = [Goldilocks::zero(); WIDTH];
-                for i in 0..WIDTH {
-                    state[i] = Goldilocks::from_canonical_u64(rand::random::<u64>());
-                }
+                state.iter_mut().for_each(|item| {
+                    *item = Goldilocks::from_canonical_u64(rand::random::<u64>());
+                });
                 state
             },
             |mut state| {

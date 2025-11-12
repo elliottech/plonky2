@@ -1,7 +1,6 @@
 use std::time::Instant;
 
 use anyhow::Result;
-use env_logger;
 use log::Level;
 use plonky2::field::types::Field;
 use plonky2::iop::witness::{PartialWitness, WitnessWrite};
