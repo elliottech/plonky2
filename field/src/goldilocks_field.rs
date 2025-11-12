@@ -156,11 +156,6 @@ impl Field for GoldilocksField {
         Self(n)
     }
 
-    #[inline(always)]
-    fn from_canonical_u64_unchecked(n: u64) -> Self {
-        Self(n)
-    }
-
     fn from_noncanonical_u96((n_lo, n_hi): (u64, u32)) -> Self {
         reduce96((n_lo, n_hi))
     }

@@ -58,7 +58,7 @@ const_assert!(check_mds_matrix());
 
 /// Addition modulo ORDER accounting for wraparound. Correct only when a + b < 2**64 + ORDER.
 #[inline(always)]
-unsafe fn add_with_wraparound(a: u64, b: u64) -> u64 {
+pub unsafe fn add_with_wraparound(a: u64, b: u64) -> u64 {
     let res: u64;
     let adj: u64;
     asm!(
@@ -872,12 +872,12 @@ unsafe fn partial_rounds(
 */
 
 #[inline(always)]
-fn unwrap_state(state: [GoldilocksField; 12]) -> [u64; 12] {
+pub(crate) fn unwrap_state(state: [GoldilocksField; 12]) -> [u64; 12] {
     state.map(|s| s.0)
 }
 
 #[inline(always)]
-fn wrap_state(state: [u64; 12]) -> [GoldilocksField; 12] {
+pub(crate) fn wrap_state(state: [u64; 12]) -> [GoldilocksField; 12] {
     state.map(GoldilocksField)
 }
 

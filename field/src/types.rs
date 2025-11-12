@@ -310,13 +310,6 @@ pub trait Field:
     // TODO: Should probably be unsafe.
     fn from_canonical_u64(n: u64) -> Self;
 
-    /// Returns `n`. Assumes that `n` is already in canonical form, i.e. `n < Self::order()`
-    /// Does not perform any checks.
-    fn from_canonical_u64_unchecked(n: u64) -> Self {
-        // overload for non-basefield implementations
-        Self::from_canonical_u64(n)
-    }
-
     /// Returns `n`. Assumes that `n` is already in canonical form, i.e. `n < Self::order()`.
     // TODO: Should probably be unsafe.
     fn from_canonical_u32(n: u32) -> Self {
