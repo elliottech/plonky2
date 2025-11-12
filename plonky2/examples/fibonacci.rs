@@ -24,18 +24,16 @@ fn main() -> Result<()> {
 
 fn work<C: GenericConfig<2>>() -> Result<()> {
     const D: usize = 2;
-    type C = PoseidonGoldilocksConfig;
-    type F = <C as GenericConfig<D>>::F;
 
     let config = CircuitConfig::standard_recursion_config();
-    let mut builder = CircuitBuilder::<F, D>::new(config);
+    let mut builder = CircuitBuilder::<C::F, D>::new(config);
 
     // The arithmetic circuit.
     let initial_a = builder.add_virtual_target();
     let initial_b = builder.add_virtual_target();
     let mut prev_target = initial_a;
     let mut cur_target = initial_b;
-    for _ in 0..99999 {
+    for _ in 0..999999 {
         let temp = builder.add(prev_target, cur_target);
         prev_target = cur_target;
         cur_target = temp;
@@ -49,15 +47,15 @@ fn work<C: GenericConfig<2>>() -> Result<()> {
     // Provide initial values.
     let timer1 = Instant::now();
     let mut pw = PartialWitness::new();
-    pw.set_target(initial_a, F::ZERO)?;
-    pw.set_target(initial_b, F::ONE)?;
+    pw.set_target(initial_a, C::F::ZERO)?;
+    pw.set_target(initial_b, C::F::ONE)?;
 
     let data = builder.build::<C>();
     let timer2 = Instant::now();
 
     // Create a TimingTree to track detailed timing information
     let mut timing = TimingTree::new("prove", Level::Debug);
-    let proof = prove::<F, C, D>(&data.prover_only, &data.common, pw, &mut timing)?;
+    let proof = prove::<C::F, C, D>(&data.prover_only, &data.common, pw, &mut timing)?;
     let timer3 = Instant::now();
 
     // Print the timing tree
