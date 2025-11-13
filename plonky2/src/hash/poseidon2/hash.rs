@@ -101,11 +101,7 @@ pub trait Poseidon2: PrimeField64 {
     #[inline]
     #[unroll::unroll_for_loops]
     fn internal_linear_layer(state: &mut [Self; WIDTH]) {
-        let tmp = state
-            .iter()
-            .map(|&x| x.to_noncanonical_u64() as u128)
-            .sum::<u128>();
-        let sum = Self::from_noncanonical_u128_with_96_bits(tmp);
+        let sum = sum_12(state); // hard coded for WIDTH = 12
         for i in 0..WIDTH {
             state[i] =
                 sum.multiply_accumulate(state[i], Self::from_canonical_u64(MATRIX_DIAG_12_U64[i]));
@@ -169,8 +165,8 @@ pub trait Poseidon2: PrimeField64 {
         let t01123 = t0123 + x[1];
         let t01233 = t0123 + x[3];
         // The order here is important. Need to overwrite x[0] and x[2] after x[1] and x[3].
-        x[3] = t01233 + x[0].double(); // 3*x[0] + x[1] + x[2] + 2*x[3]
-        x[1] = t01123 + x[2].double(); // x[0] + 2*x[1] + 3*x[2] + x[3]
+        x[3] = sum_3(&[t01233, x[0], x[0]]); // 3*x[0] + x[1] + x[2] + 2*x[3]
+        x[1] = sum_3(&[t01123, x[2], x[2]]); // x[0] + 2*x[1] + 3*x[2] + x[3]
         x[0] = t01123 + t01; // 2*x[0] + 3*x[1] + x[2] + x[3]
         x[2] = t01233 + t23; // x[0] + x[1] + 2*x[2] + 3*x[3]
     }
@@ -203,10 +199,7 @@ pub trait Poseidon2: PrimeField64 {
         // First, we apply M_4 to each consecutive four elements of the state.
         // In Appendix B's terminology, this replaces each x_i with x_i'.
         for i in (0..WIDTH).step_by(4) {
-            // Would be nice to find a better way to do this.
-            let mut state_4 = [state[i], state[i + 1], state[i + 2], state[i + 3]];
-            Self::apply_mat4_mut_circuit(builder, &mut state_4);
-            state[i..i + 4].clone_from_slice(&state_4);
+            Self::apply_mat4_mut_circuit(builder, (&mut state[i..i + 4]).try_into().unwrap());
         }
         // Now, we apply the outer circulant matrix (to compute the y_i values).
 
@@ -470,6 +463,30 @@ impl<T: Copy + Debug + Default + Eq + Permuter + Send + Sync> PlonkyPermutation<
     fn squeeze(&self) -> &[T] {
         &self.state[..Self::RATE]
     }
+}
+
+#[inline]
+fn sum_3<F: Field>(inputs: &[F]) -> F {
+    inputs[0] + inputs[1] + inputs[2]
+}
+
+#[inline]
+/// Sum of 12 elements to u128; unrolled for performance.
+fn sum_12<F: PrimeField64>(inputs: &[F]) -> F {
+    let tmp = inputs[0].to_noncanonical_u64() as u128
+        + inputs[1].to_noncanonical_u64() as u128
+        + inputs[2].to_noncanonical_u64() as u128
+        + inputs[3].to_noncanonical_u64() as u128
+        + inputs[4].to_noncanonical_u64() as u128
+        + inputs[5].to_noncanonical_u64() as u128
+        + inputs[6].to_noncanonical_u64() as u128
+        + inputs[7].to_noncanonical_u64() as u128
+        + inputs[8].to_noncanonical_u64() as u128
+        + inputs[9].to_noncanonical_u64() as u128
+        + inputs[10].to_noncanonical_u64() as u128
+        + inputs[11].to_noncanonical_u64() as u128;
+
+    F::from_noncanonical_u128_with_96_bits(tmp)
 }
 
 /// Poseidon2 hash function.
