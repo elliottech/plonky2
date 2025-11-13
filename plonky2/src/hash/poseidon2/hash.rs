@@ -1,7 +1,5 @@
 use core::fmt::Debug;
 
-use plonky2_field::ops::Square;
-
 use super::config::*;
 use super::gate::Poseidon2Gate;
 use crate::field::extension::{Extendable, FieldExtension};
@@ -15,7 +13,6 @@ use crate::plonk::circuit_builder::CircuitBuilder;
 use crate::plonk::config::{AlgebraicHasher, Hasher};
 
 pub trait Poseidon2: PrimeField64 {
-    #[inline]
     fn poseidon2(input: [Self; WIDTH]) -> [Self; WIDTH] {
         let mut state = input;
 
@@ -29,7 +26,6 @@ pub trait Poseidon2: PrimeField64 {
     }
 
     #[inline]
-    #[unroll::unroll_for_loops]
     fn full_rounds(state: &mut [Self; WIDTH], start: usize) {
         for r in start..(start + ROUNDS_F_HALF) {
             Self::add_rc(state, r);
@@ -39,7 +35,6 @@ pub trait Poseidon2: PrimeField64 {
     }
 
     #[inline]
-    #[unroll::unroll_for_loops]
     fn partial_rounds(state: &mut [Self; WIDTH]) {
         for r in 0..ROUNDS_P {
             state[0] += Self::from_canonical_u64(INTERNAL_CONSTANTS[r]);
@@ -49,7 +44,6 @@ pub trait Poseidon2: PrimeField64 {
     }
 
     #[inline]
-    #[unroll::unroll_for_loops]
     fn external_linear_layer(state: &mut [Self; WIDTH]) {
         // First, we apply M_4 to each consecutive four elements of the state.
         // In Appendix B's terminology, this replaces each x_i with x_i'.
@@ -73,7 +67,6 @@ pub trait Poseidon2: PrimeField64 {
     }
 
     #[inline]
-    #[unroll::unroll_for_loops]
     fn external_linear_layer_extension<F: FieldExtension<D, BaseField = Self>, const D: usize>(
         state: &mut [F; WIDTH],
     ) {
@@ -99,16 +92,11 @@ pub trait Poseidon2: PrimeField64 {
     }
 
     #[inline]
-    #[unroll::unroll_for_loops]
     fn internal_linear_layer(state: &mut [Self; WIDTH]) {
-        let tmp = state
-            .iter()
-            .map(|&x| x.to_noncanonical_u64() as u128)
-            .sum::<u128>();
-        let sum = Self::from_noncanonical_u128_with_96_bits(tmp);
+        let sum: Self = state.iter().cloned().sum();
         for i in 0..WIDTH {
-            state[i] =
-                sum.multiply_accumulate(state[i], Self::from_canonical_u64(MATRIX_DIAG_12_U64[i]));
+            state[i] *= Self::from_canonical_u64(MATRIX_DIAG_12_U64[i]);
+            state[i] += sum;
         }
     }
 
@@ -116,19 +104,28 @@ pub trait Poseidon2: PrimeField64 {
     fn internal_linear_layer_extension<F: FieldExtension<D, BaseField = Self>, const D: usize>(
         state: &mut [F; WIDTH],
     ) {
-        let sum: F = state.iter().cloned().sum();
-        state
-            .iter_mut()
-            .zip(MATRIX_DIAG_12_U64.iter())
-            .for_each(|(x, &m)| {
-                *x = sum.multiply_accumulate(*x, F::from_canonical_u64(m));
-            });
+        let mut sum = state[0];
+        for i in 1..WIDTH {
+            sum += state[i];
+        }
+        for i in 0..WIDTH {
+            state[i] *= F::from_canonical_u64(MATRIX_DIAG_12_U64[i]);
+            state[i] += sum;
+        }
     }
 
-    fn add_rc(state: &mut [Self; WIDTH], external_round: usize);
+    #[inline]
+    fn add_rc(state: &mut [Self; WIDTH], external_round: usize) {
+        debug_assert!(external_round < EXTERNAL_CONSTANTS.len());
+
+        for i in 0..WIDTH {
+            unsafe {
+                state[i] = state[i].add_canonical_u64(EXTERNAL_CONSTANTS[external_round][i]);
+            }
+        }
+    }
 
     #[inline]
-    #[unroll::unroll_for_loops]
     fn add_rc_extension<F: FieldExtension<D, BaseField = Self>, const D: usize>(
         state: &mut [F; WIDTH],
         external_round: usize,
@@ -140,7 +137,10 @@ pub trait Poseidon2: PrimeField64 {
         }
     }
 
-    fn sbox(state: &mut [Self; WIDTH]);
+    #[inline]
+    fn sbox(state: &mut [Self; WIDTH]) {
+        state.iter_mut().for_each(|a| *a = Self::sbox_p(a));
+    }
 
     #[inline]
     fn sbox_extension<F: FieldExtension<D, BaseField = Self>, const D: usize>(
@@ -151,9 +151,15 @@ pub trait Poseidon2: PrimeField64 {
             .for_each(|a| *a = Self::sbox_p_extension(a));
     }
 
-    fn sbox_p(a: &Self) -> Self;
+    #[inline]
+    fn sbox_p(a: &Self) -> Self {
+        a.exp_u64(D)
+    }
 
-    fn sbox_p_extension<F: FieldExtension<D, BaseField = Self>, const D: usize>(a: &F) -> F;
+    #[inline]
+    fn sbox_p_extension<F: FieldExtension<D, BaseField = Self>, const D: usize>(a: &F) -> F {
+        a.exp_u64(super::config::D)
+    }
 
     // Multiply a 4-element vector x by:
     // [ 2 3 1 1 ]
@@ -161,7 +167,6 @@ pub trait Poseidon2: PrimeField64 {
     // [ 1 1 2 3 ]
     // [ 3 1 1 2 ].
     // This is more efficient than the previous matrix.
-    #[inline]
     fn apply_mat4_mut(x: &mut [Self; 4]) {
         let t01 = x[0] + x[1];
         let t23 = x[2] + x[3];
@@ -175,7 +180,6 @@ pub trait Poseidon2: PrimeField64 {
         x[2] = t01233 + t23; // x[0] + x[1] + 2*x[2] + 3*x[3]
     }
 
-    #[inline]
     fn apply_mat4_mut_extension<F: FieldExtension<D, BaseField = Self>, const D: usize>(
         x: &mut [F; 4],
     ) {
@@ -192,8 +196,7 @@ pub trait Poseidon2: PrimeField64 {
     }
 
     // In circuit functions
-    #[inline]
-    #[unroll::unroll_for_loops]
+
     fn external_linear_layer_circuit<const D: usize>(
         builder: &mut CircuitBuilder<Self, D>,
         state: &mut [ExtensionTarget<D>; WIDTH],
@@ -226,8 +229,6 @@ pub trait Poseidon2: PrimeField64 {
         }
     }
 
-    #[inline]
-    #[unroll::unroll_for_loops]
     fn apply_mat4_mut_circuit<const D: usize>(
         builder: &mut CircuitBuilder<Self, D>,
         x: &mut [ExtensionTarget<D>; 4],
@@ -250,8 +251,6 @@ pub trait Poseidon2: PrimeField64 {
         x[2] = builder.add_extension(t01233, t23); // x[0] + x[1] + 2*x[2] + 3*x[3]
     }
 
-    #[inline]
-    #[unroll::unroll_for_loops]
     fn matmul_m4_circuit<const D: usize>(
         builder: &mut CircuitBuilder<Self, D>,
         input: &mut [ExtensionTarget<D>; WIDTH],
@@ -279,8 +278,6 @@ pub trait Poseidon2: PrimeField64 {
         }
     }
 
-    #[inline]
-    #[unroll::unroll_for_loops]
     fn add_rc_circuit<const D: usize>(
         builder: &mut CircuitBuilder<Self, D>,
         input: &mut [ExtensionTarget<D>; WIDTH],
@@ -296,8 +293,6 @@ pub trait Poseidon2: PrimeField64 {
         }
     }
 
-    #[inline]
-    #[unroll::unroll_for_loops]
     fn sbox_circuit<const D: usize>(
         builder: &mut CircuitBuilder<Self, D>,
         input: &mut [ExtensionTarget<D>; WIDTH],
@@ -320,8 +315,6 @@ pub trait Poseidon2: PrimeField64 {
         builder.exp_u64_extension(input, super::config::D)
     }
 
-    #[inline]
-    #[unroll::unroll_for_loops]
     fn internal_linear_layer_circuit<const D: usize>(
         builder: &mut CircuitBuilder<Self, D>,
         input: &mut [ExtensionTarget<D>; WIDTH],
@@ -342,67 +335,7 @@ pub trait Poseidon2: PrimeField64 {
     }
 }
 
-impl Poseidon2 for F {
-    #[inline]
-    fn sbox_p(a: &Self) -> Self {
-        let a2 = a.square();
-        let a4 = a2.square();
-        let a3 = *a * a2;
-        a3 * a4
-    }
-
-    #[inline]
-    fn sbox_p_extension<F: FieldExtension<D, BaseField = Self>, const D: usize>(a: &F) -> F {
-        let a2 = a.square();
-        let a4 = a2.square();
-        let a3 = *a * a2;
-        a3 * a4
-    }
-
-    #[inline]
-    #[cfg(not(all(target_arch = "aarch64", target_feature = "neon")))]
-    fn add_rc(state: &mut [Self; WIDTH], external_round: usize) {
-        debug_assert!(external_round < EXTERNAL_CONSTANTS.len());
-        state
-            .iter_mut()
-            .zip(EXTERNAL_CONSTANTS[external_round].iter())
-            .for_each(|(x, &m)| {
-                *x += Self::from_canonical_u64(m);
-            });
-    }
-
-    #[inline]
-    #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
-    fn add_rc(state: &mut [Self; WIDTH], external_round: usize) {
-        debug_assert!(external_round < EXTERNAL_CONSTANTS.len());
-
-        unsafe {
-            use core::mem::transmute;
-
-            use crate::hash::arch::aarch64::poseidon_goldilocks_neon::vector_add;
-
-            let state_u64 = transmute::<[Self; WIDTH], [u64; WIDTH]>(*state);
-            let round_constants = &EXTERNAL_CONSTANTS[external_round];
-
-            let res = vector_add(&state_u64, round_constants);
-            *state = transmute::<[u64; WIDTH], [Self; WIDTH]>(res);
-        }
-    }
-
-    #[inline]
-    #[cfg(not(all(target_arch = "aarch64", target_feature = "neon")))]
-    fn sbox(state: &mut [Self; WIDTH]) {
-        state.iter_mut().for_each(|a| *a = Self::sbox_p(a));
-    }
-
-    #[inline(always)]
-    #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
-    fn sbox(state: &mut [Self; WIDTH]) {
-        unsafe {
-            crate::hash::arch::aarch64::poseidon_goldilocks_neon::sbox_layer(state);
-        }
-    }
-}
+impl Poseidon2 for F {}
 
 #[derive(Copy, Clone, Default, Debug, PartialEq)]
 pub struct Poseidon2Permutation<T> {
@@ -490,8 +423,6 @@ impl<F: RichField + Poseidon2> Hasher<F> for Poseidon2Hash {
 }
 
 impl Poseidon2Hash {
-    #[inline]
-    #[unroll::unroll_for_loops]
     pub fn hash_n_to_one(
         input: &[<Poseidon2Hash as Hasher<F>>::Hash],
     ) -> <Poseidon2Hash as Hasher<F>>::Hash {
