@@ -51,24 +51,13 @@ pub trait Poseidon2: PrimeField64 {
     #[inline]
     #[unroll::unroll_for_loops]
     fn external_linear_layer(state: &mut [Self; WIDTH]) {
-        // First, we apply M_4 to each consecutive four elements of the state.
-        // In Appendix B's terminology, this replaces each x_i with x_i'.
-        for i in (0..WIDTH).step_by(4) {
-            // Would be nice to find a better way to do this.
-            let mut state_4 = [state[i], state[i + 1], state[i + 2], state[i + 3]];
-            Self::apply_mat4_mut(&mut state_4);
-            state[i..i + 4].clone_from_slice(&state_4);
-        }
-        // Now, we apply the outer circulant matrix (to compute the y_i values).
-
-        // We first precompute the four sums of every four elements.
-        let sums: [Self; 4] =
-            core::array::from_fn(|k| (0..WIDTH).step_by(4).map(|j| state[j + k]).sum::<Self>());
-
-        // The formula for each y_i involves 2x_i' term and x_j' terms for each j that equals i mod 4.
-        // In other words, we can add a single copy of x_i' to the appropriate one of our precomputed sums
+        let mut state_u128: [u128; WIDTH] = [0u128; WIDTH];
         for i in 0..WIDTH {
-            state[i] += sums[i % 4];
+            state_u128[i] = state[i].to_noncanonical_u64() as u128;
+        }
+        external_linear_layer_u128(&mut state_u128);
+        for i in 0..WIDTH {
+            state[i] = Self::from_noncanonical_u128_with_96_bits(state_u128[i]);
         }
     }
 
@@ -150,26 +139,6 @@ pub trait Poseidon2: PrimeField64 {
     fn sbox_p(a: &Self) -> Self;
 
     fn sbox_p_extension<F: FieldExtension<D, BaseField = Self>, const D: usize>(a: &F) -> F;
-
-    // Multiply a 4-element vector x by:
-    // [ 2 3 1 1 ]
-    // [ 1 2 3 1 ]
-    // [ 1 1 2 3 ]
-    // [ 3 1 1 2 ].
-    // This is more efficient than the previous matrix.
-    #[inline]
-    fn apply_mat4_mut(x: &mut [Self; 4]) {
-        let t01 = x[0] + x[1];
-        let t23 = x[2] + x[3];
-        let t0123 = t01 + t23;
-        let t01123 = t0123 + x[1];
-        let t01233 = t0123 + x[3];
-        // The order here is important. Need to overwrite x[0] and x[2] after x[1] and x[3].
-        x[3] = sum_3(&[t01233, x[0], x[0]]); // 3*x[0] + x[1] + x[2] + 2*x[3]
-        x[1] = sum_3(&[t01123, x[2], x[2]]); // x[0] + 2*x[1] + 3*x[2] + x[3]
-        x[0] = t01123 + t01; // 2*x[0] + 3*x[1] + x[2] + x[3]
-        x[2] = t01233 + t23; // x[0] + x[1] + 2*x[2] + 3*x[3]
-    }
 
     #[inline]
     fn apply_mat4_mut_extension<F: FieldExtension<D, BaseField = Self>, const D: usize>(
@@ -335,6 +304,44 @@ pub trait Poseidon2: PrimeField64 {
     }
 }
 
+#[inline]
+#[unroll::unroll_for_loops]
+fn external_linear_layer_u128(state: &mut [u128; WIDTH]) {
+    // First, we apply M_4 to each consecutive four elements of the state.
+    // In Appendix B's terminology, this replaces each x_i with x_i'.
+    for i in (0..WIDTH).step_by(4) {
+        // Multiply a 4-element vector x by:
+        // [ 2 3 1 1 ]
+        // [ 1 2 3 1 ]
+        // [ 1 1 2 3 ]
+        // [ 3 1 1 2 ].
+        let t01 = state[i] + state[i + 1];
+        let t23 = state[i + 2] + state[i + 3];
+        let t0123 = t01 + t23;
+
+        let x0 = state[i];
+        let x2 = state[i + 2];
+
+        state[i] = t0123 + t01 + state[i + 1]; // 2*x[0] + 3*x[1] + x[2] + x[3]
+        state[i + 1] = t0123 + state[i + 1] + x2 + x2; // x[0] + 2*x[1] + 3*x[2] + x[3]
+        state[i + 2] = t0123 + t23 + state[i + 3]; // x[0] + x[1] + 2*x[2] + 3*x[3]
+        state[i + 3] = t0123 + state[i + 3] + x0 + x0; // 3*x[0] + x[1] + x[2] + 2*x[3]
+    }
+    // Now, we apply the outer circulant matrix (to compute the y_i values).
+
+    // We first precompute the four sums of every four elements.
+    let mut sums = [0u128; 4];
+    for i in 0..4 {
+        sums[i] = state[i] + state[i + 4] + state[i + 8];
+    }
+
+    // The formula for each y_i involves 2x_i' term and x_j' terms for each j that equals i mod 4.
+    // In other words, we can add a single copy of x_i' to the appropriate one of our precomputed sums
+    for i in 0..WIDTH {
+        state[i] += sums[i % 4];
+    }
+}
+
 impl Poseidon2 for F {
     #[inline]
     fn sbox_p(a: &Self) -> Self {
@@ -466,13 +473,9 @@ impl<T: Copy + Debug + Default + Eq + Permuter + Send + Sync> PlonkyPermutation<
 }
 
 #[inline]
-fn sum_3<F: Field>(inputs: &[F]) -> F {
-    inputs[0] + inputs[1] + inputs[2]
-}
-
-#[inline]
 /// Sum of 12 elements to u128; unrolled for performance.
 fn sum_12<F: PrimeField64>(inputs: &[F]) -> F {
+    debug_assert!(inputs.len() == 12);
     let tmp = inputs[0].to_noncanonical_u64() as u128
         + inputs[1].to_noncanonical_u64() as u128
         + inputs[2].to_noncanonical_u64() as u128
