@@ -495,7 +495,7 @@ impl<F: RichField + Extendable<D> + Poseidon2, const D: usize> SimpleGenerator<F
 mod tests {
     use anyhow::Result;
 
-    use super::{Poseidon2Gate};
+    use super::Poseidon2Gate;
     use crate::field::goldilocks_field::GoldilocksField;
     use crate::gates::gate_testing::{test_eval_fns, test_low_degree};
     use crate::plonk::config::{GenericConfig, Poseidon2GoldilocksConfig};
