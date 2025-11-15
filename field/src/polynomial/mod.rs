@@ -440,6 +440,8 @@ impl<F: Field> Mul for &PolynomialCoeffs<F> {
 mod tests {
     use std::time::Instant;
 
+    #[cfg(feature = "cuda")]
+    use plonky2_util::log2_ceil;
     use rand::rngs::OsRng;
     use rand::Rng;
 
@@ -479,6 +481,13 @@ mod tests {
 
         let k = 8;
         let n = 1 << k;
+
+        #[cfg(feature = "cuda")]
+        {
+            zeknox::clear_cuda_errors_rs();
+            zeknox::init_twiddle_factors_rs(0, k);
+        }
+
         let poly = PolynomialCoeffs::new(F::rand_vec(n));
         let shift = F::rand();
         let coset_evals = poly.coset_fft(shift).values;
@@ -500,6 +509,13 @@ mod tests {
 
         let k = 8;
         let n = 1 << k;
+
+        #[cfg(feature = "cuda")]
+        {
+            zeknox::clear_cuda_errors_rs();
+            zeknox::init_twiddle_factors_rs(0, k);
+        }
+
         let evals = PolynomialValues::new(F::rand_vec(n));
         let shift = F::rand();
         let coeffs = evals.clone().coset_ifft(shift);
@@ -520,6 +536,12 @@ mod tests {
         type F = GoldilocksField;
         let mut rng = OsRng;
         let (a_deg, b_deg) = (rng.gen_range(1..10_000), rng.gen_range(1..10_000));
+
+        #[cfg(feature = "cuda")]
+        {
+            zeknox::clear_cuda_errors_rs();
+            zeknox::init_twiddle_factors_rs(0, log2_ceil(a_deg + b_deg + 1));
+        }
         let a = PolynomialCoeffs::new(F::rand_vec(a_deg));
         let b = PolynomialCoeffs::new(F::rand_vec(b_deg));
         let m1 = &a * &b;
@@ -537,11 +559,24 @@ mod tests {
         let mut rng = OsRng;
         let a_deg = rng.gen_range(0..1_000);
         let n = rng.gen_range(1..1_000);
+
+        #[cfg(feature = "cuda")]
+        {
+            zeknox::clear_cuda_errors_rs();
+            for i in 1..=log2_ceil(max(a_deg, n)) + 1 {
+                zeknox::init_twiddle_factors_rs(0, i);
+            }
+        }
+
         let mut a = PolynomialCoeffs::new(F::rand_vec(a_deg + 1));
+        println!("a {} b {}", a.len(), n);
+
         if a.coeffs[0].is_zero() {
             a.coeffs[0] = F::ONE; // First coefficient needs to be nonzero.
         }
         let b = a.inv_mod_xn(n);
+        println!("a {} b {}", a.len(), b.len());
+
         let mut m = &a * &b;
         m.coeffs.truncate(n);
         m.trim();
@@ -575,6 +610,15 @@ mod tests {
         type F = GoldilocksField;
         let mut rng = OsRng;
         let (a_deg, b_deg) = (rng.gen_range(1..10_000), rng.gen_range(1..10_000));
+
+        #[cfg(feature = "cuda")]
+        {
+            zeknox::clear_cuda_errors_rs();
+            for i in 1..=log2_ceil(max(a_deg, b_deg)) + 1 {
+                zeknox::init_twiddle_factors_rs(0, i);
+            }
+        }
+
         let a = PolynomialCoeffs::new(F::rand_vec(a_deg));
         let b = PolynomialCoeffs::new(F::rand_vec(b_deg));
         let (q, r) = a.div_rem(&b);
@@ -606,6 +650,7 @@ mod tests {
         let mut rng = OsRng;
         let l = 14;
         let n = 1 << l;
+
         let g = F::primitive_root_of_unity(l);
         let xn_minus_one = {
             let mut xn_min_one_vec = vec![F::ZERO; n + 1];
@@ -616,6 +661,15 @@ mod tests {
 
         let a = g.exp_u64(rng.gen_range(0..(n as u64)));
         let denom = PolynomialCoeffs::new(vec![-a, F::ONE]);
+
+        #[cfg(feature = "cuda")]
+        {
+            zeknox::clear_cuda_errors_rs();
+            for i in 1..=l + 1 {
+                zeknox::init_twiddle_factors_rs(0, i);
+            }
+        }
+
         let now = Instant::now();
         xn_minus_one.div_rem(&denom);
         println!("Division time: {:?}", now.elapsed());
