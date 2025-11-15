@@ -32,16 +32,59 @@ pub fn fft_root_table<F: Field>(n: usize) -> FftRootTable<F> {
     root_table
 }
 
+#[cfg(feature = "cuda")]
+fn fft_dispatch_gpu<F: Field>(
+    input: &mut [F],
+    zero_factor: Option<usize>,
+    root_table: Option<&FftRootTable<F>>,
+) {
+    use zeknox::ntt_batch;
+    use zeknox::types::NTTConfig;
+    if F::CUDA_SUPPORT {
+        return ntt_batch(
+            0,
+            input.as_mut_ptr(),
+            input.len().trailing_zeros() as usize,
+            NTTConfig::default(),
+        );
+    } else {
+        return fft_dispatch_cpu(input, zero_factor, root_table);
+    }
+}
+
+fn fft_dispatch_cpu<F: Field>(
+    input: &mut [F],
+    zero_factor: Option<usize>,
+    root_table: Option<&FftRootTable<F>>,
+) {
+    if root_table.is_some() {
+        return fft_classic(input, zero_factor.unwrap_or(0), root_table.unwrap());
+    } else {
+        // let pre_computed = F::pre_compute_fft_root_table(input.len());
+        // if pre_computed.is_some() {
+        //     return fft_classic(input, zero_factor.unwrap_or(0), pre_computed.unwrap());
+        // } else {
+        //     let computed = fft_root_table::<F>(input.len());
+
+        //     return fft_classic(input, zero_factor.unwrap_or(0), computed.as_ref());
+        // }
+        let computed = fft_root_table::<F>(input.len());
+
+        return fft_classic(input, zero_factor.unwrap_or(0), computed.as_ref());
+    };
+}
+
 #[inline]
 fn fft_dispatch<F: Field>(
     input: &mut [F],
     zero_factor: Option<usize>,
     root_table: Option<&FftRootTable<F>>,
 ) {
-    let computed_root_table = root_table.is_none().then(|| fft_root_table(input.len()));
-    let used_root_table = root_table.or(computed_root_table.as_ref()).unwrap();
+    #[cfg(feature = "cuda")]
+    return fft_dispatch_gpu(input, zero_factor, root_table);
 
-    fft_classic(input, zero_factor.unwrap_or(0), used_root_table);
+    #[cfg(not(feature = "cuda"))]
+    return fft_dispatch_cpu(input, zero_factor, root_table);
 }
 
 #[inline]
@@ -206,6 +249,8 @@ mod tests {
     use alloc::vec::Vec;
 
     use plonky2_util::{log2_ceil, log2_strict};
+    #[cfg(feature = "cuda")]
+    use zeknox::init_twiddle_factors_rs;
 
     use crate::fft::{fft, fft_with_options, ifft};
     use crate::goldilocks_field::GoldilocksField;
@@ -218,6 +263,13 @@ mod tests {
         let degree = 200usize;
         let degree_padded = degree.next_power_of_two();
 
+        #[cfg(feature = "cuda")]
+        let log_degree = {
+            zeknox::clear_cuda_errors_rs();
+            let log_degree = degree_padded.trailing_zeros() as usize;
+            init_twiddle_factors_rs(0, log_degree);
+            log_degree
+        };
         // Create a vector of coeffs; the first degree of them are
         // "random", the last degree_padded-degree of them are zero.
         let coeffs = (0..degree)
@@ -239,6 +291,8 @@ mod tests {
         }
 
         for r in 0..4 {
+            #[cfg(feature = "cuda")]
+            init_twiddle_factors_rs(0, log_degree + r);
             // expand coefficients by factor 2^r by filling with zeros
             let zero_tail = coefficients.lde(r);
             assert_eq!(

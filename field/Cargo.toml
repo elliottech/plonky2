@@ -19,6 +19,9 @@ serde = { workspace = true, features = ["alloc"] }
 static_assertions = { workspace = true }
 unroll = { workspace = true }
 
+# cuda accelerator wrapper
+zeknox = { workspace = true }
+
 # Local dependencies
 plonky2_util = { version = "1.0.0", path = "../util", default-features = false }
 
@@ -29,3 +32,9 @@ rustdoc-args = ["--html-in-header", ".cargo/katex-header.html"]
 
 [lints]
 workspace = true
+
+
+[features]
+# default = []
+default = [ "cuda" ]
+cuda = []

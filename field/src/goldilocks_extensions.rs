@@ -45,11 +45,15 @@ impl Extendable<4> for GoldilocksField {
     // DTH_ROOT = W^((ORDER - 1)/4)
     const DTH_ROOT: Self = Self(281474976710656);
 
-    const EXT_MULTIPLICATIVE_GROUP_GENERATOR: [Self; 4] =
-        [Self(0), Self(8295451483910296135), Self(0), Self(0)];
+    const EXT_MULTIPLICATIVE_GROUP_GENERATOR: [Self; 4] = [
+        Self(5024755240244648895),
+        Self(13227474371289740625),
+        Self(3912887029498544536),
+        Self(3900057112666848848),
+    ];
 
     const EXT_POWER_OF_TWO_GENERATOR: [Self; 4] =
-        [Self(0), Self(0), Self(0), Self(17216955519093520442)];
+        [Self(0), Self(0), Self(0), Self(12587610116473453104)];
 }
 
 impl Mul for QuarticExtension<GoldilocksField> {
@@ -71,11 +75,11 @@ impl Extendable<5> for GoldilocksField {
     const DTH_ROOT: Self = Self(1041288259238279555);
 
     const EXT_MULTIPLICATIVE_GROUP_GENERATOR: [Self; 5] = [
-        Self(4624713872807171977),
-        Self(381988216716071028),
-        Self(14499722700050429911),
-        Self(4870631734967222356),
-        Self(4518902370426242880),
+        Self(2899034827742553394),
+        Self(13012057356839176729),
+        Self(14593811582388663055),
+        Self(7722900811313895436),
+        Self(4557222484695340057),
     ];
 
     const EXT_POWER_OF_TWO_GENERATOR: [Self; 5] = [
