@@ -283,6 +283,15 @@ impl<F: Field> PolynomialCoeffs<F> {
         zero_factor: Option<usize>,
         root_table: Option<&FftRootTable<F>>,
     ) -> PolynomialValues<F> {
+        #[cfg(feature = "cuda")]
+        {
+            if F::CUDA_SUPPORT && shift == F::coset_shift() {
+                // Use GPU coset FFT directly without CPU-side coefficient modification
+                return crate::fft::coset_fft_gpu(self.clone(), zero_factor, root_table);
+            }
+        }
+
+        // CPU path: multiply by powers of shift, then do regular FFT
         let modified_poly: Self = shift
             .powers()
             .zip(&self.coeffs)
