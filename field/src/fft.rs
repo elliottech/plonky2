@@ -52,6 +52,177 @@ fn fft_dispatch_gpu<F: Field>(
     }
 }
 
+/// Batch FFT computation for multiple polynomials on GPU
+#[cfg(feature = "cuda")]
+fn fft_batch_dispatch_gpu<F: Field>(
+    inputs: &mut [F],
+    poly_size: usize,
+    num_polys: usize,
+    zero_factor: Option<usize>,
+    root_table: Option<&FftRootTable<F>>,
+) {
+    use zeknox::ntt_batch;
+    use zeknox::types::NTTConfig;
+
+    if F::CUDA_SUPPORT {
+        let mut cfg = NTTConfig::default();
+        cfg.batches = num_polys as u32;
+
+        return ntt_batch(
+            0,
+            inputs.as_mut_ptr(),
+            poly_size.trailing_zeros() as usize,
+            cfg,
+        );
+    } else {
+        // Fallback to CPU: process each polynomial separately
+        for i in 0..num_polys {
+            let start = i * poly_size;
+            let end = start + poly_size;
+            fft_dispatch_cpu(&mut inputs[start..end], zero_factor, root_table);
+        }
+    }
+}
+
+#[cfg(feature = "cuda")]
+pub(crate) fn coset_fft_gpu<F: Field>(
+    poly: PolynomialCoeffs<F>,
+    zero_factor: Option<usize>,
+    root_table: Option<&FftRootTable<F>>,
+) -> PolynomialValues<F> {
+    use zeknox::ntt_batch;
+    use zeknox::types::NTTConfig;
+
+    if !F::CUDA_SUPPORT {
+        // Fallback to CPU if CUDA not supported for this field
+        let modified_poly: PolynomialCoeffs<F> = F::coset_shift()
+            .powers()
+            .zip(&poly.coeffs)
+            .map(|(r, &c)| r * c)
+            .collect::<Vec<_>>()
+            .into();
+        return fft_with_options(modified_poly, zero_factor, root_table);
+    }
+
+    let PolynomialCoeffs { coeffs: mut buffer } = poly;
+    let lg_n = buffer.len().trailing_zeros() as usize;
+
+    // // Initialize coset on GPU
+    // // For Goldilocks field, the coset generator is 7 (MULTIPLICATIVE_GROUP_GENERATOR)
+    // // TODO: Make this generic for other fields if needed
+    // let coset_gen_u64 = 7u64;
+    // init_coset_rs(0, lg_n, coset_gen_u64);
+
+    // Configure NTT for coset
+    let mut cfg = NTTConfig::default();
+    cfg.with_coset = true;
+    cfg.ntt_type = zeknox::types::NTTType::Coset;
+
+    // Perform coset NTT on GPU
+    ntt_batch(0, buffer.as_mut_ptr(), lg_n, cfg);
+
+    PolynomialValues::new(buffer)
+}
+
+/// Batch coset FFT computation for multiple polynomials on GPU
+#[cfg(feature = "cuda")]
+fn coset_fft_batch_gpu<F: Field>(
+    polys: Vec<PolynomialCoeffs<F>>,
+    zero_factor: Option<usize>,
+    root_table: Option<&FftRootTable<F>>,
+) -> Vec<PolynomialValues<F>> {
+    use zeknox::ntt_batch;
+    use zeknox::types::NTTConfig;
+
+    if polys.is_empty() {
+        return Vec::new();
+    }
+
+    let num_polys = polys.len();
+    let poly_size = polys[0].len();
+
+    // Verify all polynomials have the same size
+    assert!(
+        polys.iter().all(|p| p.len() == poly_size),
+        "All polynomials must have the same size for batch coset FFT"
+    );
+
+    if !F::CUDA_SUPPORT {
+        // Fallback to CPU if CUDA not supported for this field
+        return polys
+            .into_iter()
+            .map(|poly| {
+                let modified_poly: PolynomialCoeffs<F> = F::coset_shift()
+                    .powers()
+                    .zip(&poly.coeffs)
+                    .map(|(r, &c)| r * c)
+                    .collect::<Vec<_>>()
+                    .into();
+                fft_with_options(modified_poly, zero_factor, root_table)
+            })
+            .collect();
+    }
+
+    // Flatten all polynomials into a single contiguous buffer
+    let mut buffer: Vec<F> = Vec::with_capacity(num_polys * poly_size);
+    for poly in polys {
+        buffer.extend_from_slice(&poly.coeffs);
+    }
+
+    let lg_n = poly_size.trailing_zeros() as usize;
+
+    // Configure NTT for batch coset
+    let mut cfg = NTTConfig::default();
+    cfg.batches = num_polys as u32;
+    cfg.with_coset = true;
+    cfg.ntt_type = zeknox::types::NTTType::Coset;
+
+    // Perform batch coset NTT on GPU
+    ntt_batch(0, buffer.as_mut_ptr(), lg_n, cfg);
+
+    // Split the buffer back into separate polynomials
+    buffer
+        .chunks(poly_size)
+        .map(|chunk| PolynomialValues::new(chunk.to_vec()))
+        .collect()
+}
+
+/// Compute coset FFT for multiple polynomials in batch.
+/// All polynomials must have the same size (power of 2).
+/// Returns a vector of PolynomialValues in the same order as input.
+pub fn coset_fft_batch<F: Field>(polys: Vec<PolynomialCoeffs<F>>) -> Vec<PolynomialValues<F>> {
+    coset_fft_batch_with_options(polys, None, None)
+}
+
+/// Compute coset FFT for multiple polynomials in batch with options.
+/// All polynomials must have the same size (power of 2).
+/// Returns a vector of PolynomialValues in the same order as input.
+pub fn coset_fft_batch_with_options<F: Field>(
+    polys: Vec<PolynomialCoeffs<F>>,
+    zero_factor: Option<usize>,
+    root_table: Option<&FftRootTable<F>>,
+) -> Vec<PolynomialValues<F>> {
+    #[cfg(feature = "cuda")]
+    return coset_fft_batch_gpu(polys, zero_factor, root_table);
+
+    #[cfg(not(feature = "cuda"))]
+    {
+        // CPU fallback: process each polynomial separately
+        polys
+            .into_iter()
+            .map(|poly| {
+                let modified_poly: PolynomialCoeffs<F> = F::coset_shift()
+                    .powers()
+                    .zip(&poly.coeffs)
+                    .map(|(r, &c)| r * c)
+                    .collect::<Vec<_>>()
+                    .into();
+                fft_with_options(modified_poly, zero_factor, root_table)
+            })
+            .collect()
+    }
+}
+
 fn fft_dispatch_cpu<F: Field>(
     input: &mut [F],
     zero_factor: Option<usize>,
@@ -101,6 +272,66 @@ pub fn fft_with_options<F: Field>(
     let PolynomialCoeffs { coeffs: mut buffer } = poly;
     fft_dispatch(&mut buffer, zero_factor, root_table);
     PolynomialValues::new(buffer)
+}
+
+/// Compute FFT for multiple polynomials in batch.
+/// All polynomials must have the same size (power of 2).
+/// Returns a vector of PolynomialValues in the same order as input.
+#[inline]
+pub fn fft_batch<F: Field>(polys: Vec<PolynomialCoeffs<F>>) -> Vec<PolynomialValues<F>> {
+    fft_batch_with_options(polys, None, None)
+}
+
+/// Compute FFT for multiple polynomials in batch with options.
+/// All polynomials must have the same size (power of 2).
+/// Returns a vector of PolynomialValues in the same order as input.
+pub fn fft_batch_with_options<F: Field>(
+    polys: Vec<PolynomialCoeffs<F>>,
+    zero_factor: Option<usize>,
+    root_table: Option<&FftRootTable<F>>,
+) -> Vec<PolynomialValues<F>> {
+    if polys.is_empty() {
+        return Vec::new();
+    }
+
+    let num_polys = polys.len();
+    let poly_size = polys[0].len();
+
+    // Verify all polynomials have the same size
+    assert!(
+        polys.iter().all(|p| p.len() == poly_size),
+        "All polynomials must have the same size for batch FFT"
+    );
+    assert!(
+        poly_size.is_power_of_two(),
+        "Polynomial size must be a power of 2"
+    );
+
+    // Flatten all polynomials into a single contiguous buffer
+    let mut buffer: Vec<F> = Vec::with_capacity(num_polys * poly_size);
+    for poly in polys {
+        buffer.extend_from_slice(&poly.coeffs);
+    }
+
+    // Dispatch to GPU or CPU batch processing
+    #[cfg(feature = "cuda")]
+    fft_batch_dispatch_gpu(&mut buffer, poly_size, num_polys, zero_factor, root_table);
+
+    #[cfg(not(feature = "cuda"))]
+    {
+        // CPU fallback: process each polynomial separately
+        for i in 0..num_polys {
+            let start = i * poly_size;
+            let end = start + poly_size;
+            fft_dispatch_cpu(&mut buffer[start..end], zero_factor, root_table);
+        }
+    }
+
+    // Split the buffer back into separate polynomials
+    buffer
+        .chunks(poly_size)
+        .map(|chunk| PolynomialValues::new(chunk.to_vec()))
+        .collect()
 }
 
 #[inline]
@@ -252,7 +483,7 @@ mod tests {
     #[cfg(feature = "cuda")]
     use zeknox::init_twiddle_factors_rs;
 
-    use crate::fft::{fft, fft_with_options, ifft};
+    use crate::fft::{coset_fft_batch, fft, fft_batch, fft_with_options, ifft};
     use crate::goldilocks_field::GoldilocksField;
     use crate::polynomial::{PolynomialCoeffs, PolynomialValues};
     use crate::types::Field;
@@ -300,6 +531,248 @@ mod tests {
                 fft_with_options(zero_tail, Some(r), None)
             );
         }
+    }
+
+    #[test]
+    #[cfg(feature = "cuda")]
+    fn test_fft_gpu_vs_cpu_single() {
+        type F = GoldilocksField;
+
+        // Test various polynomial sizes
+        for log_size in [8, 10, 12, 14] {
+            let size = 1 << log_size;
+            zeknox::clear_cuda_errors_rs();
+            init_twiddle_factors_rs(0, log_size);
+
+            // Create a random polynomial
+            let coeffs: Vec<F> = (0..size)
+                .map(|i| F::from_canonical_usize(i * 7919 % 1000000))
+                .collect();
+
+            let poly = PolynomialCoeffs {
+                coeffs: coeffs.clone(),
+            };
+
+            // Compute FFT using GPU (via fft function which dispatches to GPU)
+            let gpu_result = fft(poly.clone());
+
+            // Compute FFT using CPU (force CPU path)
+            let mut cpu_buffer = coeffs.clone();
+            super::fft_dispatch_cpu(&mut cpu_buffer, None, None);
+            let cpu_result = PolynomialValues::new(cpu_buffer);
+
+            // Compare results
+            assert_eq!(
+                gpu_result.len(),
+                cpu_result.len(),
+                "GPU and CPU results have different lengths for size {}",
+                size
+            );
+
+            for i in 0..size {
+                assert_eq!(
+                    gpu_result.values[i], cpu_result.values[i],
+                    "Mismatch at index {} for polynomial size {}",
+                    i, size
+                );
+            }
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "cuda")]
+    fn test_fft_batch_gpu_vs_cpu() {
+        type F = GoldilocksField;
+
+        let poly_size: usize = 1 << 10; // 1024 elements
+        let num_polys = 8;
+        let log_size = poly_size.trailing_zeros() as usize;
+
+        zeknox::clear_cuda_errors_rs();
+        init_twiddle_factors_rs(0, log_size);
+
+        // Create multiple random polynomials
+        let polys: Vec<PolynomialCoeffs<F>> = (0..num_polys)
+            .map(|batch_idx| {
+                let coeffs: Vec<F> = (0..poly_size)
+                    .map(|i| F::from_canonical_usize((i * 7919 + batch_idx * 12345) % 1000000))
+                    .collect();
+                PolynomialCoeffs { coeffs }
+            })
+            .collect();
+
+        // Compute batch FFT using GPU
+        let gpu_results = fft_batch(polys.clone());
+
+        // Compute FFT for each polynomial using CPU
+        let cpu_results: Vec<PolynomialValues<F>> = polys
+            .into_iter()
+            .map(|poly| {
+                let mut buffer = poly.coeffs.clone();
+                super::fft_dispatch_cpu(&mut buffer, None, None);
+                PolynomialValues::new(buffer)
+            })
+            .collect();
+
+        // Compare results
+        assert_eq!(gpu_results.len(), cpu_results.len());
+        for (batch_idx, (gpu_result, cpu_result)) in
+            gpu_results.iter().zip(cpu_results.iter()).enumerate()
+        {
+            assert_eq!(gpu_result.len(), cpu_result.len());
+            for i in 0..poly_size {
+                assert_eq!(
+                    gpu_result.values[i], cpu_result.values[i],
+                    "Batch FFT mismatch at batch {} index {}",
+                    batch_idx, i
+                );
+            }
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "cuda")]
+    fn test_coset_fft_gpu_vs_cpu_single() {
+        use zeknox::init_coset_rs;
+
+        use crate::types::PrimeField64;
+        type F = GoldilocksField;
+
+        for log_size in [8, 10, 12] {
+            let size = 1 << log_size;
+            zeknox::clear_cuda_errors_rs();
+            init_twiddle_factors_rs(0, log_size);
+
+            // Initialize coset for GPU
+            let coset_gen_u64 = F::coset_shift().to_canonical_u64();
+            init_coset_rs(0, log_size, coset_gen_u64);
+
+            // Create a random polynomial
+            let coeffs: Vec<F> = (0..size)
+                .map(|i| F::from_canonical_usize(i * 8191 % 1000000))
+                .collect();
+
+            let poly = PolynomialCoeffs {
+                coeffs: coeffs.clone(),
+            };
+
+            // Compute coset FFT using GPU
+            let gpu_result = super::coset_fft_gpu(poly.clone(), None, None);
+
+            // Compute coset FFT using CPU (apply coset shift then FFT)
+            let modified_poly: PolynomialCoeffs<F> = F::coset_shift()
+                .powers()
+                .zip(&coeffs)
+                .map(|(r, &c)| r * c)
+                .collect::<Vec<_>>()
+                .into();
+
+            let mut cpu_buffer = modified_poly.coeffs;
+            super::fft_dispatch_cpu(&mut cpu_buffer, None, None);
+            let cpu_result = PolynomialValues::new(cpu_buffer);
+
+            // Compare results
+            assert_eq!(
+                gpu_result.len(),
+                cpu_result.len(),
+                "GPU and CPU coset FFT results have different lengths for size {}",
+                size
+            );
+
+            for i in 0..size {
+                assert_eq!(
+                    gpu_result.values[i], cpu_result.values[i],
+                    "Coset FFT mismatch at index {} for polynomial size {}",
+                    i, size
+                );
+            }
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "cuda")]
+    fn test_coset_fft_batch_gpu_vs_cpu() {
+        use zeknox::init_coset_rs;
+
+        use crate::types::PrimeField64;
+        type F = GoldilocksField;
+
+        let poly_size: usize = 1 << 10; // 1024 elements
+        let num_polys = 8;
+        let log_size = poly_size.trailing_zeros() as usize;
+
+        zeknox::clear_cuda_errors_rs();
+        init_twiddle_factors_rs(0, log_size);
+
+        // Initialize coset for GPU
+        let coset_gen_u64 = F::coset_shift().to_canonical_u64();
+        init_coset_rs(0, log_size, coset_gen_u64);
+
+        // Create multiple random polynomials
+        let polys: Vec<PolynomialCoeffs<F>> = (0..num_polys)
+            .map(|batch_idx| {
+                let coeffs: Vec<F> = (0..poly_size)
+                    .map(|i| F::from_canonical_usize((i * 8191 + batch_idx * 54321) % 1000000))
+                    .collect();
+                PolynomialCoeffs { coeffs }
+            })
+            .collect();
+
+        // Compute batch coset FFT using GPU
+        let gpu_results = coset_fft_batch(polys.clone());
+
+        // Compute coset FFT for each polynomial using CPU
+        let cpu_results: Vec<PolynomialValues<F>> = polys
+            .into_iter()
+            .map(|poly| {
+                let modified_poly: PolynomialCoeffs<F> = F::coset_shift()
+                    .powers()
+                    .zip(&poly.coeffs)
+                    .map(|(r, &c)| r * c)
+                    .collect::<Vec<_>>()
+                    .into();
+
+                let mut buffer = modified_poly.coeffs;
+                super::fft_dispatch_cpu(&mut buffer, None, None);
+                PolynomialValues::new(buffer)
+            })
+            .collect();
+
+        // Compare results
+        assert_eq!(gpu_results.len(), cpu_results.len());
+        for (batch_idx, (gpu_result, cpu_result)) in
+            gpu_results.iter().zip(cpu_results.iter()).enumerate()
+        {
+            assert_eq!(gpu_result.len(), cpu_result.len());
+            for i in 0..poly_size {
+                assert_eq!(
+                    gpu_result.values[i], cpu_result.values[i],
+                    "Batch coset FFT mismatch at batch {} index {}",
+                    batch_idx, i
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_batch_fft_empty() {
+        type F = GoldilocksField;
+        let polys: Vec<PolynomialCoeffs<F>> = vec![];
+        let results = fft_batch(polys);
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    #[should_panic(expected = "All polynomials must have the same size")]
+    fn test_batch_fft_different_sizes() {
+        type F = GoldilocksField;
+        let poly1 = PolynomialCoeffs {
+            coeffs: vec![F::ONE; 256],
+        };
+        let poly2 = PolynomialCoeffs {
+            coeffs: vec![F::ONE; 512],
+        };
+        let _ = fft_batch(vec![poly1, poly2]);
     }
 
     fn evaluate_naive<F: Field>(coefficients: &PolynomialCoeffs<F>) -> PolynomialValues<F> {
