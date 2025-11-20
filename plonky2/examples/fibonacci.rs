@@ -1,14 +1,21 @@
-use anyhow::Result;
+use anyhow::{Ok, Result};
+use log::Level;
 use plonky2::field::types::Field;
 use plonky2::iop::witness::{PartialWitness, WitnessWrite};
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 use plonky2::plonk::circuit_data::CircuitConfig;
 use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
+use plonky2::util::timing::TimingTree;
 
 /// An example of using Plonky2 to prove a statement of the form
 /// "I know the 100th element of the Fibonacci sequence, starting with constants a and b."
 /// When a == 0 and b == 1, this is proving knowledge of the 100th (standard) Fibonacci number.
 fn main() -> Result<()> {
+    env_logger::Builder::from_default_env()
+        .format_timestamp(None)
+        .filter_level(log::LevelFilter::Debug)
+        .init();
+
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;
     type F = <C as GenericConfig<D>>::F;
@@ -21,7 +28,7 @@ fn main() -> Result<()> {
     let initial_b = builder.add_virtual_target();
     let mut prev_target = initial_a;
     let mut cur_target = initial_b;
-    for _ in 0..99 {
+    for _ in 0..999999 {
         let temp = builder.add(prev_target, cur_target);
         prev_target = cur_target;
         cur_target = temp;
@@ -38,12 +45,16 @@ fn main() -> Result<()> {
     pw.set_target(initial_b, F::ONE)?;
 
     let data = builder.build::<C>();
-    let proof = data.prove(pw)?;
+    let mut timing = TimingTree::new("prove", Level::Info);
+    println!("Starting proof generation...");
+    let proof = plonky2::plonk::prover::prove(&data.prover_only, &data.common, pw, &mut timing)?;
 
     println!(
         "100th Fibonacci number mod |F| (starting with {}, {}) is: {}",
         proof.public_inputs[0], proof.public_inputs[1], proof.public_inputs[2]
     );
-
-    data.verify(proof)
+    timing.print();
+    data.verify(proof)?;
+    println!("Proof verified!");
+    Ok(())
 }

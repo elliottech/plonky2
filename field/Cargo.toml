@@ -29,3 +29,7 @@ rustdoc-args = ["--html-in-header", ".cargo/katex-header.html"]
 
 [lints]
 workspace = true
+
+[features]
+default = []
+cuda = []

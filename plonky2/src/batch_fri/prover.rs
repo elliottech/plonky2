@@ -104,7 +104,8 @@ pub(crate) fn batch_fri_committed_trees<
 
         reverse_index_bits_in_place(&mut final_values.values);
         let chunked_values = final_values.values.par_chunks(arity).map(flatten).collect();
-        let tree = MerkleTree::<F, C::Hasher>::new(chunked_values, fri_params.config.cap_height);
+        let tree =
+            MerkleTree::<F, C::Hasher>::new_from_2d(chunked_values, fri_params.config.cap_height);
 
         challenger.observe_cap(&tree.cap);
         trees.push(tree);

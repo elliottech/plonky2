@@ -15,7 +15,7 @@ use crate::fri::oracle::PolynomialBatch;
 use crate::fri::proof::FriProof;
 use crate::fri::structure::{FriBatchInfo, FriInstanceInfo};
 use crate::fri::FriParams;
-use crate::hash::batch_merkle_tree::BatchMerkleTree;
+// use crate::hash::batch_merkle_tree::BatchMerkleTree;
 use crate::hash::hash_types::RichField;
 use crate::iop::challenger::Challenger;
 use crate::plonk::config::GenericConfig;

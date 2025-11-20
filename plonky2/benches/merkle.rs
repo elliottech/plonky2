@@ -23,7 +23,7 @@ pub(crate) fn bench_merkle_tree<F: RichField, H: Hasher<F>>(c: &mut Criterion) {
         let size = 1 << size_log;
         group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, _| {
             let leaves = vec![F::rand_vec(ELEMS_PER_LEAF); size];
-            b.iter(|| MerkleTree::<F, H>::new(leaves.clone(), 0));
+            b.iter(|| MerkleTree::<F, H>::new_from_2d(leaves.clone(), 0));
         });
     }
 }
