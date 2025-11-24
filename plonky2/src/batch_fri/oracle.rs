@@ -300,6 +300,18 @@ mod test {
             reduction_arity_bits,
         };
 
+        #[cfg(feature = "cuda")]
+        {
+            zeknox::clear_cuda_errors_rs();
+            // Initialize twiddle factors for all dimensions that will be used
+            // This test involves multiple polynomials and recursive verification,
+            // so we initialize a wider range of dimensions to be safe
+            let current_log_size = k0 + fri_params.config.rate_bits;
+            for i in 0..=current_log_size + 5 {
+                zeknox::init_twiddle_factors_rs(0, i);
+            }
+        }
+
         let n0 = 1 << k0;
         let n1 = 1 << k1;
         let n2 = 1 << k2;

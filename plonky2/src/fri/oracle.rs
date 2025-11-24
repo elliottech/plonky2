@@ -65,7 +65,8 @@ impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>
         let coeffs = timed!(
             timing,
             "IFFT",
-            values.into_par_iter().map(|v| v.ifft()).collect::<Vec<_>>()
+            // Use sequential iteration for deterministic results
+            values.into_iter().map(|v| v.ifft()).collect::<Vec<_>>()
         );
 
         Self::from_coeffs(
@@ -95,7 +96,20 @@ impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>
         );
 
         let mut leaves = timed!(timing, "transpose LDEs", transpose(&lde_values));
+        // Debug: Print first leaf for determinism check
+        if !leaves.is_empty() && !leaves[0].is_empty() {
+            println!(
+                "First leaf before reverse_bits: {:?}",
+                &leaves[0][..4.min(leaves[0].len())]
+            );
+        }
         reverse_index_bits_in_place(&mut leaves);
+        if !leaves.is_empty() && !leaves[0].is_empty() {
+            println!(
+                "First leaf after reverse_bits: {:?}",
+                &leaves[0][..4.min(leaves[0].len())]
+            );
+        }
         let merkle_tree = timed!(
             timing,
             "build Merkle tree",
@@ -121,9 +135,16 @@ impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>
 
         // If blinding, salt with two random elements to each leaf vector.
         let salt_size = if blinding { SALT_SIZE } else { 0 };
+        println!(
+            "lde_values: num_polys={}, degree={}, blinding={}, salt_size={}",
+            polynomials.len(),
+            degree,
+            blinding,
+            salt_size
+        );
 
         polynomials
-            .par_iter()
+            .iter()
             .map(|p| {
                 assert_eq!(p.len(), degree, "Polynomial degrees inconsistent");
                 p.lde(rate_bits)
@@ -132,7 +153,7 @@ impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>
             })
             .chain(
                 (0..salt_size)
-                    .into_par_iter()
+                    .into_iter()
                     .map(|_| F::rand_vec(degree << rate_bits)),
             )
             .collect()
