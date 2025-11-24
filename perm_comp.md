@@ -1,7 +1,9 @@
 # Performance comparison
-- CPU: AMD 7950x3d 16 core
-- GPU: 4080 super; single card
-- 
+- CPU: AMD 7950x3d; 16 core
+- GPU: NVidia 4080; single card
+- Circuit size: 2^19 gates
+- Total CPU time: **32.97 s**
+- Total GPU time: **19.71 s**
 
 | Operation | CPU (s) | GPU (s) | Speedup | GPU Tuned? |
 |-----------|---------|---------|---------|------------|
