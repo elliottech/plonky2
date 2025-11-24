@@ -335,40 +335,40 @@ impl<F: RichField, H: Hasher<F>> MerkleTree<F, H> {
         let digests_buf = capacity_up_to_mut(&mut digests, num_digests);
         let cap_buf = capacity_up_to_mut(&mut cap, len_cap);
 
-        // #[cfg(feature = "cuda")]
-        // {
-        //     // Check if we should use GPU acceleration
-        //     // Use GPU for large trees (>= 1024 leaves) or if CUDA_MERKLE_THRESHOLD is set
-        //     let use_gpu = if let Ok(threshold_str) = std::env::var("CUDA_MERKLE_THRESHOLD") {
-        //         if let Ok(threshold) = threshold_str.parse::<usize>() {
-        //             leaves.len() >= threshold
-        //         } else {
-        //             leaves.len() >= 1024
-        //         }
-        //     } else {
-        //         leaves.len() >= 1024
-        //     };
+        #[cfg(feature = "cuda")]
+        {
+            // Check if we should use GPU acceleration
+            // Use GPU for large trees (>= 1024 leaves) or if CUDA_MERKLE_THRESHOLD is set
+            let use_gpu = if let Ok(threshold_str) = std::env::var("CUDA_MERKLE_THRESHOLD") {
+                if let Ok(threshold) = threshold_str.parse::<usize>() {
+                    leaves.len() >= threshold
+                } else {
+                    leaves.len() >= 1024
+                }
+            } else {
+                leaves.len() >= 1024
+            };
 
-        //     if use_gpu {
-        //         // Flatten leaves into 1D vector for GPU
-        //         let leaf_size = if leaves.is_empty() { 0 } else { leaves[0].len() };
-        //         let zeros = vec![F::ZERO; leaf_size];
-        //         let mut leaves_1d: Vec<F> = Vec::with_capacity(leaves.len() * leaf_size);
-        //         for leaf in &leaves {
-        //             if leaf.is_empty() {
-        //                 leaves_1d.extend(zeros.clone());
-        //             } else {
-        //                 leaves_1d.extend(leaf.clone());
-        //             }
-        //         }
+            if use_gpu {
+                // Flatten leaves into 1D vector for GPU
+                let leaf_size = if leaves.is_empty() { 0 } else { leaves[0].len() };
+                let zeros = vec![F::ZERO; leaf_size];
+                let mut leaves_1d: Vec<F> = Vec::with_capacity(leaves.len() * leaf_size);
+                for leaf in &leaves {
+                    if leaf.is_empty() {
+                        leaves_1d.extend(zeros.clone());
+                    } else {
+                        leaves_1d.extend(leaf.clone());
+                    }
+                }
 
-        //         fill_digests_buf_gpu::<F, H>(digests_buf, cap_buf, &leaves_1d, leaf_size, cap_height);
-        //     } else {
-        //         fill_digests_buf::<F, H>(digests_buf, cap_buf, &leaves[..], cap_height);
-        //     }
-        // }
+                fill_digests_buf_gpu::<F, H>(digests_buf, cap_buf, &leaves_1d, leaf_size, cap_height);
+            } else {
+                fill_digests_buf::<F, H>(digests_buf, cap_buf, &leaves[..], cap_height);
+            }
+        }
 
-        // #[cfg(not(feature = "cuda"))]
+        #[cfg(not(feature = "cuda"))]
         {
             fill_digests_buf::<F, H>(digests_buf, cap_buf, &leaves[..], cap_height);
         }

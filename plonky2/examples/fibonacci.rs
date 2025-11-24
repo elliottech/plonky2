@@ -27,7 +27,7 @@ fn main() -> Result<()> {
     let initial_b = builder.add_virtual_target();
     let mut prev_target = initial_a;
     let mut cur_target = initial_b;
-    for _ in 0..99 {
+    for _ in 0..9999999 {
         let temp = builder.add(prev_target, cur_target);
         prev_target = cur_target;
         cur_target = temp;
@@ -45,14 +45,14 @@ fn main() -> Result<()> {
         //     zeknox::init_twiddle_factors_rs(0, i);
         // }
 
-        zeknox::init_twiddle_factors_rs(0, 3);
-        zeknox::init_twiddle_factors_rs(0, 6);
+        zeknox::init_twiddle_factors_rs(0, 19);
+        zeknox::init_twiddle_factors_rs(0, 22);
         // Initialize coset on GPU
         // For Goldilocks field, the coset generator is 7 (MULTIPLICATIVE_GROUP_GENERATOR)
         // TODO: Make this generic for other fields if needed
         let coset_gen_u64 = 7u64;
-        // zeknox::init_coset_rs(0, 19, coset_gen_u64);
-        zeknox::init_coset_rs(0, 6, coset_gen_u64);
+        zeknox::init_coset_rs(0, 22, coset_gen_u64);
+        // zeknox::init_coset_rs(0, 16, coset_gen_u64);
     }
 
     // Public inputs are the two initial values (provided below) and the result (which is generated).

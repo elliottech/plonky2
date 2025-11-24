@@ -38,43 +38,46 @@ fn fft_dispatch_gpu<F: Field>(
     zero_factor: Option<usize>,
     root_table: Option<&FftRootTable<F>>,
 ) {
-    use zeknox::ntt_batch;
-    use zeknox::types::NTTConfig;
-
-    let mut a = input.to_vec();
-    let mut b = input.to_vec();
-
-    ntt_batch(
-        0,
-        a.as_mut_ptr(),
-        input.len().trailing_zeros() as usize,
-        NTTConfig::default(),
-    );
-
-    fft_dispatch_cpu(&mut b, zero_factor, root_table);
-    ark_std::println!("a: {:?}", a);
-    ark_std::println!("b: {:?}", b);
-
-    assert_eq!(
-        a, b,
-        "failed GPU FFT vs CPU FFT comparison\ngpu:{:?}\ncpu:{:?}\ninput:{:?}",
-        a, b, input
-    );
-
-    input.copy_from_slice(&a);
-
-    // use zeknox::ntt_batch;
-    // use zeknox::types::NTTConfig;
     // if F::CUDA_SUPPORT {
-    //     return ntt_batch(
+    //     use zeknox::ntt_batch;
+    //     use zeknox::types::NTTConfig;
+
+    //     let mut a = input.to_vec();
+    //     let mut b = input.to_vec();
+
+    //     ntt_batch(
     //         0,
-    //         input.as_mut_ptr(),
+    //         a.as_mut_ptr(),
     //         input.len().trailing_zeros() as usize,
     //         NTTConfig::default(),
     //     );
-    // } else {
-    //     return fft_dispatch_cpu(input, zero_factor, root_table);
+
+    //     fft_dispatch_cpu(&mut b, zero_factor, root_table);
+    //     ark_std::println!("a: {:?}", a);
+    //     ark_std::println!("b: {:?}", b);
+
+    //     assert_eq!(
+    //         a, b,
+    //         "failed GPU FFT vs CPU FFT comparison\ngpu:{:?}\ncpu:{:?}\ninput:{:?}",
+    //         a, b, input
+    //     );
+
+    //     input.copy_from_slice(&a);
     // }
+    // return fft_dispatch_cpu(input, zero_factor, root_table);
+
+    use zeknox::ntt_batch;
+    use zeknox::types::NTTConfig;
+    if F::CUDA_SUPPORT {
+        return ntt_batch(
+            0,
+            input.as_mut_ptr(),
+            input.len().trailing_zeros() as usize,
+            NTTConfig::default(),
+        );
+    } else {
+        return fft_dispatch_cpu(input, zero_factor, root_table);
+    }
 }
 
 /// Batch FFT computation for multiple polynomials on GPU
@@ -269,7 +272,7 @@ pub fn coset_fft_batch_with_options<F: Field>(
     // }
 }
 
-fn fft_dispatch_cpu<F: Field>(
+pub(crate) fn fft_dispatch_cpu<F: Field>(
     input: &mut [F],
     zero_factor: Option<usize>,
     root_table: Option<&FftRootTable<F>>,
@@ -298,10 +301,15 @@ fn fft_dispatch<F: Field>(
     root_table: Option<&FftRootTable<F>>,
 ) {
     #[cfg(feature = "cuda")]
-    return fft_dispatch_gpu(input, zero_factor, root_table);
-
+    {
+        // ark_std::println!("Using GPU FFT dispatch");
+        return fft_dispatch_gpu(input, zero_factor, root_table);
+    }
     #[cfg(not(feature = "cuda"))]
-    return fft_dispatch_cpu(input, zero_factor, root_table);
+    {
+        // ark_std::println!("Using CPU FFT dispatch");
+        return fft_dispatch_cpu(input, zero_factor, root_table);
+    }
 }
 
 #[inline]
@@ -529,14 +537,15 @@ mod tests {
     #[cfg(feature = "cuda")]
     use zeknox::init_twiddle_factors_rs;
 
-    use crate::fft::{
-        coset_fft_batch, fft, fft_batch, fft_dispatch_cpu, fft_dispatch_gpu, fft_with_options, ifft,
-    };
+    #[cfg(feature = "cuda")]
+    use crate::fft::{coset_fft_batch, fft_dispatch_cpu, fft_dispatch_gpu};
+    use crate::fft::{fft, fft_batch, fft_with_options, ifft};
     use crate::goldilocks_field::GoldilocksField;
     use crate::polynomial::{PolynomialCoeffs, PolynomialValues};
     use crate::types::Field;
 
     #[test]
+    #[cfg(feature = "cuda")]
     fn test_kat() {
         init_twiddle_factors_rs(0, 4);
 
@@ -669,7 +678,7 @@ mod tests {
         type F = GoldilocksField;
 
         // Test various polynomial sizes
-        for log_size in [8, 10, 12, 14] {
+        for log_size in [8, 10, 12, 14,16,18,20] {
             let size = 1 << log_size;
             zeknox::clear_cuda_errors_rs();
             init_twiddle_factors_rs(0, log_size);

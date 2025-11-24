@@ -36,6 +36,6 @@ workspace = true
 
 
 [features]
-# default = []
-default = [ "cuda" ]
+default = []
+# default = [ "cuda" ]
 cuda = []

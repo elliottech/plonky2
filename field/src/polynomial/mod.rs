@@ -12,7 +12,7 @@ use plonky2_util::log2_strict;
 use serde::{Deserialize, Serialize};
 
 use crate::extension::{Extendable, FieldExtension};
-use crate::fft::{fft, fft_with_options, ifft, FftRootTable};
+use crate::fft::{fft, fft_dispatch_cpu, fft_with_options, ifft, FftRootTable};
 use crate::types::Field;
 
 /// A polynomial in point-value form.
@@ -283,22 +283,26 @@ impl<F: Field> PolynomialCoeffs<F> {
         zero_factor: Option<usize>,
         root_table: Option<&FftRootTable<F>>,
     ) -> PolynomialValues<F> {
-        // #[cfg(feature = "cuda")]
-        // {
-        //     if F::CUDA_SUPPORT && shift == F::coset_shift() {
-        //         // Use GPU coset FFT directly without CPU-side coefficient modification
-        //         return crate::fft::coset_fft_gpu(self.clone(), zero_factor, root_table);
-        //     }
-        // }
+        #[cfg(feature = "cuda")]
+        {
+            if F::CUDA_SUPPORT && shift == F::coset_shift() {
+                // Use GPU coset FFT directly without CPU-side coefficient modification
+                // ark_std::println!("Using GPU coset FFT: degree {}", self.len() - 1);
+                return crate::fft::coset_fft_gpu(self.clone(), zero_factor, root_table);
+            }
+        }
 
         // CPU path: multiply by powers of shift, then do regular FFT
-        let modified_poly: Self = shift
+        let mut modified_poly: Self = shift
             .powers()
             .zip(&self.coeffs)
             .map(|(r, &c)| r * c)
             .collect::<Vec<_>>()
             .into();
-        modified_poly.fft_with_options(zero_factor, root_table)
+
+        fft_dispatch_cpu(&mut modified_poly.coeffs, zero_factor, root_table);
+        modified_poly.coeffs.into()
+        // modified_poly.fft_with_options(zero_factor, root_table)
     }
 
     pub fn to_extension<const D: usize>(&self) -> PolynomialCoeffs<F::Extension>
