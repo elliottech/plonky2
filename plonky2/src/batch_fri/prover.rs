@@ -264,6 +264,17 @@ mod tests {
         };
 
         let n = 1 << k;
+
+        #[cfg(feature = "cuda")]
+        {
+            zeknox::clear_cuda_errors_rs();
+            // Initialize twiddle factors for all dimensions that will be used
+            let current_log_size = k + fri_params.config.rate_bits;
+            for i in 0..=current_log_size {
+                zeknox::init_twiddle_factors_rs(0, i);
+            }
+        }
+
         let trace = PolynomialValues::new((1..n + 1).map(F::from_canonical_i64).collect_vec());
 
         let polynomial_batch: BatchFriOracle<GoldilocksField, C, D> = BatchFriOracle::from_values(
@@ -359,6 +370,16 @@ mod tests {
             degree_bits: k0,
             reduction_arity_bits,
         };
+
+        #[cfg(feature = "cuda")]
+        {
+            zeknox::clear_cuda_errors_rs();
+            // Initialize twiddle factors for all dimensions that will be used
+            let current_log_size = k0 + fri_params.config.rate_bits;
+            for i in 0..=current_log_size {
+                zeknox::init_twiddle_factors_rs(0, i);
+            }
+        }
 
         let n0 = 1 << k0;
         let n1 = 1 << k1;

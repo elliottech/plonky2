@@ -15,6 +15,7 @@ use once_cell::sync::Lazy;
 use plonky2_maybe_rayon::*;
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "cuda")]
+<<<<<<< HEAD
 use zeknox::device::memory::HostOrDeviceSlice;
 #[cfg(feature = "cuda")]
 use zeknox::device::stream::CudaStream;
@@ -22,6 +23,13 @@ use zeknox::device::stream::CudaStream;
 use zeknox::fill_digests_buf_linear_gpu_with_gpu_ptr;
 #[cfg(feature = "cuda")]
 use zeknox::fill_digests_buf_linear_multigpu_with_gpu_ptr;
+=======
+use zeknox::device::{memory::HostOrDeviceSlice, stream::CudaStream};
+#[cfg(feature = "cuda")]
+use zeknox::{
+    fill_digests_buf_linear_gpu_with_gpu_ptr, fill_digests_buf_linear_multigpu_with_gpu_ptr,
+};
+>>>>>>> zz-lighter/zz/cuda_integration
 
 use crate::hash::hash_types::RichField;
 #[cfg(feature = "cuda")]
@@ -258,10 +266,102 @@ fn fill_digests_buf<F: RichField, H: Hasher<F>>(
 }
 
 #[cfg(feature = "cuda")]
+<<<<<<< HEAD
 #[repr(C)]
 union U8U64 {
     f1: [u8; 32],
     f2: [u64; 4],
+=======
+fn fill_digests_buf_gpu_ptr<F: RichField, H: Hasher<F>>(
+    digests_buf: &mut [MaybeUninit<H::Hash>],
+    cap_buf: &mut [MaybeUninit<H::Hash>],
+    leaves_ptr: *const F,
+    leaves_len: usize,
+    leaf_len: usize,
+    cap_height: usize,
+    gpu_id: u64,
+) {
+    let digests_count: u64 = digests_buf.len().try_into().unwrap();
+    let leaves_count: u64 = leaves_len.try_into().unwrap();
+    let caps_count: u64 = cap_buf.len().try_into().unwrap();
+    let cap_height: u64 = cap_height.try_into().unwrap();
+    let leaf_size: u64 = leaf_len.try_into().unwrap();
+
+    // if digests_buf is empty (size 0), just allocate a few bytes to avoid errors
+    let digests_size = if digests_buf.len() == 0 {
+        NUM_HASH_OUT_ELTS
+    } else {
+        digests_buf.len() * NUM_HASH_OUT_ELTS
+    };
+    let caps_size = if cap_buf.len() == 0 {
+        NUM_HASH_OUT_ELTS
+    } else {
+        cap_buf.len() * NUM_HASH_OUT_ELTS
+    };
+
+    let mut gpu_digests_buf: HostOrDeviceSlice<'_, F> =
+        HostOrDeviceSlice::cuda_malloc(gpu_id as i32, digests_size).unwrap();
+    let mut gpu_cap_buf: HostOrDeviceSlice<'_, F> =
+        HostOrDeviceSlice::cuda_malloc(gpu_id as i32, caps_size).unwrap();
+
+    unsafe {
+        let num_gpus: usize = std::env::var("NUM_OF_GPUS")
+            .unwrap_or_else(|_| "1".to_string())
+            .parse()
+            .unwrap_or(1);
+
+        if leaves_count >= (1 << 12) && cap_height > 0 && num_gpus > 1 {
+            // Multi-GPU path
+            fill_digests_buf_linear_multigpu_with_gpu_ptr(
+                gpu_digests_buf.as_mut_ptr() as *mut core::ffi::c_void,
+                gpu_cap_buf.as_mut_ptr() as *mut core::ffi::c_void,
+                leaves_ptr as *mut core::ffi::c_void,
+                digests_count,
+                caps_count,
+                leaves_count,
+                leaf_size,
+                cap_height,
+                0, // hash_type: 0 for Poseidon
+            );
+        } else {
+            // Single GPU path
+            fill_digests_buf_linear_gpu_with_gpu_ptr(
+                gpu_digests_buf.as_mut_ptr() as *mut core::ffi::c_void,
+                gpu_cap_buf.as_mut_ptr() as *mut core::ffi::c_void,
+                leaves_ptr as *mut core::ffi::c_void,
+                digests_count,
+                caps_count,
+                leaves_count,
+                leaf_size,
+                cap_height,
+                0, // hash_type: 0 for Poseidon
+                gpu_id,
+            );
+        }
+    }
+
+    let stream1 = CudaStream::create().unwrap();
+    let stream2 = CudaStream::create().unwrap();
+
+    gpu_digests_buf
+        .copy_to_host_ptr_async(
+            digests_buf.as_mut_ptr() as *mut core::ffi::c_void,
+            digests_size,
+            &stream1,
+        )
+        .expect("copy digests");
+    gpu_cap_buf
+        .copy_to_host_ptr_async(
+            cap_buf.as_mut_ptr() as *mut core::ffi::c_void,
+            caps_size,
+            &stream2,
+        )
+        .expect("copy caps");
+    stream1.synchronize().expect("cuda sync");
+    stream2.synchronize().expect("cuda sync");
+    stream1.destroy().expect("cuda stream destroy");
+    stream2.destroy().expect("cuda stream destroy");
+>>>>>>> zz-lighter/zz/cuda_integration
 }
 
 #[cfg(feature = "cuda")]
@@ -270,6 +370,33 @@ fn fill_digests_buf_gpu<F: RichField, H: Hasher<F>>(
     cap_buf: &mut [MaybeUninit<H::Hash>],
     leaves: &Vec<F>,
     leaf_size: usize,
+<<<<<<< HEAD
+=======
+    cap_height: usize,
+) {
+    let leaves_count = leaves.len() / leaf_size;
+    let gpu_id = 0;
+
+    let mut gpu_leaves_buf: HostOrDeviceSlice<'_, F> =
+        HostOrDeviceSlice::cuda_malloc(gpu_id as i32, leaves.len()).unwrap();
+
+    let _ = gpu_leaves_buf.copy_from_host(leaves.as_slice());
+
+    fill_digests_buf_gpu_ptr::<F, H>(
+        digests_buf,
+        cap_buf,
+        gpu_leaves_buf.as_mut_ptr(),
+        leaves_count,
+        leaf_size,
+        cap_height,
+        gpu_id,
+    );
+}
+
+pub(crate) fn merkle_tree_prove<F: RichField, H: Hasher<F>>(
+    leaf_index: usize,
+    leaves_len: usize,
+>>>>>>> zz-lighter/zz/cuda_integration
     cap_height: usize,
 ) {
     let leaves_count = leaves.len() / leaf_size;
@@ -482,12 +609,53 @@ impl<F: RichField, H: Hasher<F>> MerkleTree<F, H> {
 
         let digests_buf = capacity_up_to_mut(&mut digests, num_digests);
         let cap_buf = capacity_up_to_mut(&mut cap, len_cap);
+<<<<<<< HEAD
         let now = Instant::now();
         fill_digests_buf_meta::<F, H>(digests_buf, cap_buf, &leaves_1d, leaf_size, cap_height);
         print_time(now, "fill digests buffer");
+=======
+
+        #[cfg(feature = "cuda")]
+        {
+            // Check if we should use GPU acceleration
+            // Use GPU for large trees (>= 1024 leaves) or if CUDA_MERKLE_THRESHOLD is set
+            let use_gpu = if let Ok(threshold_str) = std::env::var("CUDA_MERKLE_THRESHOLD") {
+                if let Ok(threshold) = threshold_str.parse::<usize>() {
+                    leaves.len() >= threshold
+                } else {
+                    leaves.len() >= 1024
+                }
+            } else {
+                leaves.len() >= 1024
+            };
+
+            if use_gpu {
+                // Flatten leaves into 1D vector for GPU
+                let leaf_size = if leaves.is_empty() { 0 } else { leaves[0].len() };
+                let zeros = vec![F::ZERO; leaf_size];
+                let mut leaves_1d: Vec<F> = Vec::with_capacity(leaves.len() * leaf_size);
+                for leaf in &leaves {
+                    if leaf.is_empty() {
+                        leaves_1d.extend(zeros.clone());
+                    } else {
+                        leaves_1d.extend(leaf.clone());
+                    }
+                }
+
+                fill_digests_buf_gpu::<F, H>(digests_buf, cap_buf, &leaves_1d, leaf_size, cap_height);
+            } else {
+                fill_digests_buf::<F, H>(digests_buf, cap_buf, &leaves[..], cap_height);
+            }
+        }
+
+        #[cfg(not(feature = "cuda"))]
+        {
+            fill_digests_buf::<F, H>(digests_buf, cap_buf, &leaves[..], cap_height);
+        }
+>>>>>>> zz-lighter/zz/cuda_integration
 
         unsafe {
-            // SAFETY: `fill_digests_buf` and `cap` initialized the spare capacity up to
+            // SAFETY: `fill_digests_buf` or `fill_digests_buf_gpu` initialized the spare capacity up to
             // `num_digests` and `len_cap`, resp.
             digests.set_len(num_digests);
             cap.set_len(len_cap);

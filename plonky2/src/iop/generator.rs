@@ -36,7 +36,7 @@ pub fn generate_partial_witness<
     let config = &common_data.config;
     let generators = &prover_data.generators;
     let generator_indices_by_watches = &prover_data.generator_indices_by_watches;
-
+    println!("Initializing witness.");
     let mut witness = PartitionWitness::new(
         config.num_wires,
         common_data.degree(),
@@ -56,6 +56,8 @@ pub fn generate_partial_witness<
     let mut remaining_generators = generators.len();
 
     let mut buffer = GeneratedValues::empty();
+
+    println!("Starting generator execution.");
 
     // Keep running generators until we fail to make progress.
     while !pending_generator_indices.is_empty() {
@@ -95,6 +97,8 @@ pub fn generate_partial_witness<
 
         pending_generator_indices = next_pending_generator_indices;
     }
+
+    println!("Finished generator execution.");
 
     if remaining_generators != 0 {
         return Err(anyhow!("{} generators weren't run", remaining_generators));

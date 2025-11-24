@@ -11,6 +11,7 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
+ark-std = "0.5.0"
 anyhow = { workspace = true }
 itertools = { workspace = true, features = ["use_alloc"] }
 num = { workspace = true, features = ["alloc"] }
@@ -18,6 +19,9 @@ rand = { workspace = true, features = ["getrandom"] }
 serde = { workspace = true, features = ["alloc"] }
 static_assertions = { workspace = true }
 unroll = { workspace = true }
+
+# cuda accelerator wrapper
+zeknox = { workspace = true }
 
 # Local dependencies
 plonky2_util = { version = "1.0.0", path = "../util", default-features = false }
@@ -30,6 +34,8 @@ rustdoc-args = ["--html-in-header", ".cargo/katex-header.html"]
 [lints]
 workspace = true
 
+
 [features]
 default = []
+# default = [ "cuda" ]
 cuda = []

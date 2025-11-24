@@ -150,6 +150,7 @@ where
     let degree = common_data.degree();
 
     set_lookup_wires(prover_data, common_data, &mut partition_witness)?;
+    println!("Set lookup wires.");
 
     let public_inputs = partition_witness.get_targets(&prover_data.public_inputs);
     let public_inputs_hash = C::InnerHasher::hash_no_pad(&public_inputs);
@@ -159,17 +160,25 @@ where
         "compute full witness",
         partition_witness.full_witness()
     );
-
+    println!("Computed full witness.");
     let wires_values: Vec<PolynomialValues<F>> = timed!(
         timing,
         "compute wire polynomials",
+        // Use sequential iteration for deterministic results
         witness
             .wire_values
-            .par_iter()
+            .iter()
             .map(|column| PolynomialValues::new(column.clone()))
             .collect()
     );
-
+    println!("Computed wire polynomials.");
+    // Debug: Print first few wire values to check determinism
+    if !wires_values.is_empty() && !wires_values[0].values.is_empty() {
+        println!(
+            "First wire poly first 5 values: {:?}",
+            &wires_values[0].values[..5.min(wires_values[0].values.len())]
+        );
+    }
     let wires_commitment = timed!(
         timing,
         "compute wires commitment",
@@ -182,7 +191,7 @@ where
             prover_data.fft_root_table.as_ref(),
         )
     );
-
+    println!("Computed wires commitment.");
     let mut challenger = Challenger::<F, C::Hasher>::new();
 
     // Observe the FRI config
@@ -230,6 +239,7 @@ where
         .collect();
     let zs_partial_products = [plonk_z_vecs, partial_products_and_zs.concat()].concat();
 
+    println!("Computed Z and partial products.");
     // All lookup polys: RE and partial SLDCs.
     let lookup_polys =
         compute_all_lookup_polys(&witness, &deltas, prover_data, common_data, has_lookup);
@@ -240,6 +250,7 @@ where
         zs_partial_products
     };
 
+    println!("Computed lookup polynomials.");
     let partial_products_zs_and_lookup_commitment = timed!(
         timing,
         "commit to partial products, Z's and, if any, lookup polynomials",
@@ -272,7 +283,12 @@ where
             &alphas,
         )
     );
+    println!("prover alphas: {:?}", alphas);
+    println!("prover betas: {:?}", betas);
+    println!("prover gammas: {:?}", gammas);
+    println!("prover deltas: {:?}", deltas);
 
+    println!("Split up quotient polys.");
     let all_quotient_poly_chunks: Vec<PolynomialCoeffs<F>> = timed!(
         timing,
         "split up quotient polys",
@@ -288,6 +304,7 @@ where
             .collect()
     );
 
+    println!("Committed to quotient polys.");
     let quotient_polys_commitment = timed!(
         timing,
         "commit to quotient polys",
@@ -301,9 +318,11 @@ where
         )
     );
 
+    println!("Committed to quotient polys.");
     challenger.observe_cap::<C::Hasher>(&quotient_polys_commitment.merkle_tree.cap);
 
     let zeta = challenger.get_extension_challenge::<D>();
+    println!("prover zeta: {:?}", zeta);
     // To avoid leaking witness data, we want to ensure that our opening locations, `zeta` and
     // `g * zeta`, are not in our subgroup `H`. It suffices to check `zeta` only, since
     // `(g * zeta)^n = zeta^n`, where `n` is the order of `g`.
@@ -313,6 +332,7 @@ where
         "Opening point is in the subgroup."
     );
 
+    println!("Constructing the opening set, including lookups.");
     let openings = timed!(
         timing,
         "construct the opening set, including lookups",
@@ -326,6 +346,8 @@ where
             common_data
         )
     );
+    println!("Computed openings.");
+
     challenger.observe_openings(&openings.to_fri_openings());
     let instance = common_data.get_fri_instance(zeta);
 
@@ -347,7 +369,7 @@ where
             timing,
         )
     );
-
+    println!("Computed opening proofs.");
     let proof = Proof::<F, C, D> {
         wires_cap: wires_commitment.merkle_tree.cap,
         plonk_zs_partial_products_cap: partial_products_zs_and_lookup_commitment.merkle_tree.cap,
