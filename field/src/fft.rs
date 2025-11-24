@@ -40,16 +40,41 @@ fn fft_dispatch_gpu<F: Field>(
 ) {
     use zeknox::ntt_batch;
     use zeknox::types::NTTConfig;
-    if F::CUDA_SUPPORT {
-        return ntt_batch(
-            0,
-            input.as_mut_ptr(),
-            input.len().trailing_zeros() as usize,
-            NTTConfig::default(),
-        );
-    } else {
-        return fft_dispatch_cpu(input, zero_factor, root_table);
-    }
+
+    let mut a = input.to_vec();
+    let mut b = input.to_vec();
+
+    ntt_batch(
+        0,
+        a.as_mut_ptr(),
+        input.len().trailing_zeros() as usize,
+        NTTConfig::default(),
+    );
+
+    fft_dispatch_cpu(&mut b, zero_factor, root_table);
+    ark_std::println!("a: {:?}", a);
+    ark_std::println!("b: {:?}", b);
+
+    assert_eq!(
+        a, b,
+        "failed GPU FFT vs CPU FFT comparison\ngpu:{:?}\ncpu:{:?}\ninput:{:?}",
+        a, b, input
+    );
+
+    input.copy_from_slice(&a);
+
+    // use zeknox::ntt_batch;
+    // use zeknox::types::NTTConfig;
+    // if F::CUDA_SUPPORT {
+    //     return ntt_batch(
+    //         0,
+    //         input.as_mut_ptr(),
+    //         input.len().trailing_zeros() as usize,
+    //         NTTConfig::default(),
+    //     );
+    // } else {
+    //     return fft_dispatch_cpu(input, zero_factor, root_table);
+    // }
 }
 
 /// Batch FFT computation for multiple polynomials on GPU
@@ -202,25 +227,46 @@ pub fn coset_fft_batch_with_options<F: Field>(
     zero_factor: Option<usize>,
     root_table: Option<&FftRootTable<F>>,
 ) -> Vec<PolynomialValues<F>> {
-    #[cfg(feature = "cuda")]
-    return coset_fft_batch_gpu(polys, zero_factor, root_table);
+    // #[cfg(feature = "cuda")]
+    // {
+    //     let a = coset_fft_batch_gpu(polys.clone(), zero_factor, root_table);
+    //     let b = polys
+    //         .into_iter()
+    //         .map(|poly| {
+    //             let modified_poly: PolynomialCoeffs<F> = F::coset_shift()
+    //                 .powers()
+    //                 .zip(&poly.coeffs)
+    //                 .map(|(r, &c)| r * c)
+    //                 .collect::<Vec<_>>()
+    //                 .into();
+    //             fft_with_options(modified_poly, zero_factor, root_table)
+    //         })
+    //         .collect::<Vec<_>>();
+    //     assert_eq!(a.len(), b.len());
 
-    #[cfg(not(feature = "cuda"))]
-    {
-        // CPU fallback: process each polynomial separately
-        polys
-            .into_iter()
-            .map(|poly| {
-                let modified_poly: PolynomialCoeffs<F> = F::coset_shift()
-                    .powers()
-                    .zip(&poly.coeffs)
-                    .map(|(r, &c)| r * c)
-                    .collect::<Vec<_>>()
-                    .into();
-                fft_with_options(modified_poly, zero_factor, root_table)
-            })
-            .collect()
-    }
+    //     for (i, (val_a, val_b)) in a.iter().zip(b.iter()).enumerate() {
+    //         assert_eq!(val_a, val_b, "Mismatch at index {}", i);
+    //     }
+
+    //     return a;
+    // }
+
+    // #[cfg(not(feature = "cuda"))]
+    // {
+    // CPU fallback: process each polynomial separately
+    polys
+        .into_iter()
+        .map(|poly| {
+            let modified_poly: PolynomialCoeffs<F> = F::coset_shift()
+                .powers()
+                .zip(&poly.coeffs)
+                .map(|(r, &c)| r * c)
+                .collect::<Vec<_>>()
+                .into();
+            fft_with_options(modified_poly, zero_factor, root_table)
+        })
+        .collect()
+    // }
 }
 
 fn fft_dispatch_cpu<F: Field>(
@@ -483,10 +529,94 @@ mod tests {
     #[cfg(feature = "cuda")]
     use zeknox::init_twiddle_factors_rs;
 
-    use crate::fft::{coset_fft_batch, fft, fft_batch, fft_with_options, ifft};
+    use crate::fft::{
+        coset_fft_batch, fft, fft_batch, fft_dispatch_cpu, fft_dispatch_gpu, fft_with_options, ifft,
+    };
     use crate::goldilocks_field::GoldilocksField;
     use crate::polynomial::{PolynomialCoeffs, PolynomialValues};
     use crate::types::Field;
+
+    #[test]
+    fn test_kat() {
+        init_twiddle_factors_rs(0, 4);
+
+        let input = [
+            16807u64,
+            10376289027450995739,
+            18446743787439915009,
+            1905022641934172156,
+            4730749933575995392,
+            68841472,
+            18428264577490855681,
+            18445589101169082369,
+            18446744069414567514,
+            8070455041963588582,
+            49,
+            1625527855624486912,
+            7,
+            18446744069414555649,
+            7696581392640,
+            481036337152,
+        ];
+        let input_field: Vec<GoldilocksField> = input
+            .iter()
+            .map(|&x| GoldilocksField::from_canonical_u64(x))
+            .collect();
+
+        let res_cpu = [
+            8241673866677297204,
+            18443207692673526440,
+            3336172192632445894,
+            12915814655533318448,
+            5977358399840934215,
+            2796120128477098295,
+            16099264885043452953,
+            1114428869533774434,
+            1182881845840683068,
+            18442399148451944616,
+            5639697009785877037,
+            5534977815694745617,
+            3521085621945067109,
+            15650623939293352472,
+            11342098386477995483,
+            17336148097415430195,
+        ];
+        let res_cpu_field: Vec<GoldilocksField> = res_cpu
+            .iter()
+            .map(|&x| GoldilocksField::from_canonical_u64(x))
+            .collect();
+
+        let res_gpu = [
+            8241673866677297204,
+            18443207692673526440,
+            3336172192632445894,
+            12915814655533318448,
+            5977358399840934215,
+            2796120128477098295,
+            16099264885043452953,
+            1114428869533774434,
+            1182881845840683068,
+            18442399148451944616,
+            5639697009785877037,
+            5534977815694745617,
+            3521085621945067109,
+            15650623939293352472,
+            11342098386477995483,
+            17336148097415430195,
+        ];
+        let res_gpu_field: Vec<GoldilocksField> = res_gpu
+            .iter()
+            .map(|&x| GoldilocksField::from_canonical_u64(x))
+            .collect();
+
+        let mut input_cpu = input_field.clone();
+        fft_dispatch_cpu(&mut input_cpu, None, None);
+        assert_eq!(input_cpu, res_cpu_field);
+
+        let mut input_gpu = input_field.clone();
+        fft_dispatch_gpu(&mut input_gpu, None, None);
+        assert_eq!(input_gpu, res_gpu_field);
+    }
 
     #[test]
     fn fft_and_ifft() {
