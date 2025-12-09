@@ -678,7 +678,7 @@ mod tests {
         type F = GoldilocksField;
 
         // Test various polynomial sizes
-        for log_size in [8, 10, 12, 14,16,18,20] {
+        for log_size in [8, 10, 12, 14, 16, 18, 20] {
             let size = 1 << log_size;
             zeknox::clear_cuda_errors_rs();
             init_twiddle_factors_rs(0, log_size);

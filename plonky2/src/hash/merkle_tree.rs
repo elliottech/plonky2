@@ -15,21 +15,11 @@ use once_cell::sync::Lazy;
 use plonky2_maybe_rayon::*;
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "cuda")]
-<<<<<<< HEAD
-use zeknox::device::memory::HostOrDeviceSlice;
-#[cfg(feature = "cuda")]
-use zeknox::device::stream::CudaStream;
-#[cfg(feature = "cuda")]
-use zeknox::fill_digests_buf_linear_gpu_with_gpu_ptr;
-#[cfg(feature = "cuda")]
-use zeknox::fill_digests_buf_linear_multigpu_with_gpu_ptr;
-=======
 use zeknox::device::{memory::HostOrDeviceSlice, stream::CudaStream};
 #[cfg(feature = "cuda")]
 use zeknox::{
     fill_digests_buf_linear_gpu_with_gpu_ptr, fill_digests_buf_linear_multigpu_with_gpu_ptr,
 };
->>>>>>> zz-lighter/zz/cuda_integration
 
 use crate::hash::hash_types::RichField;
 #[cfg(feature = "cuda")]
@@ -266,12 +256,6 @@ fn fill_digests_buf<F: RichField, H: Hasher<F>>(
 }
 
 #[cfg(feature = "cuda")]
-<<<<<<< HEAD
-#[repr(C)]
-union U8U64 {
-    f1: [u8; 32],
-    f2: [u64; 4],
-=======
 fn fill_digests_buf_gpu_ptr<F: RichField, H: Hasher<F>>(
     digests_buf: &mut [MaybeUninit<H::Hash>],
     cap_buf: &mut [MaybeUninit<H::Hash>],
@@ -361,7 +345,6 @@ fn fill_digests_buf_gpu_ptr<F: RichField, H: Hasher<F>>(
     stream2.synchronize().expect("cuda sync");
     stream1.destroy().expect("cuda stream destroy");
     stream2.destroy().expect("cuda stream destroy");
->>>>>>> zz-lighter/zz/cuda_integration
 }
 
 #[cfg(feature = "cuda")]
@@ -370,8 +353,6 @@ fn fill_digests_buf_gpu<F: RichField, H: Hasher<F>>(
     cap_buf: &mut [MaybeUninit<H::Hash>],
     leaves: &Vec<F>,
     leaf_size: usize,
-<<<<<<< HEAD
-=======
     cap_height: usize,
 ) {
     let leaves_count = leaves.len() / leaf_size;
@@ -396,7 +377,6 @@ fn fill_digests_buf_gpu<F: RichField, H: Hasher<F>>(
 pub(crate) fn merkle_tree_prove<F: RichField, H: Hasher<F>>(
     leaf_index: usize,
     leaves_len: usize,
->>>>>>> zz-lighter/zz/cuda_integration
     cap_height: usize,
 ) {
     let leaves_count = leaves.len() / leaf_size;
@@ -609,11 +589,6 @@ impl<F: RichField, H: Hasher<F>> MerkleTree<F, H> {
 
         let digests_buf = capacity_up_to_mut(&mut digests, num_digests);
         let cap_buf = capacity_up_to_mut(&mut cap, len_cap);
-<<<<<<< HEAD
-        let now = Instant::now();
-        fill_digests_buf_meta::<F, H>(digests_buf, cap_buf, &leaves_1d, leaf_size, cap_height);
-        print_time(now, "fill digests buffer");
-=======
 
         #[cfg(feature = "cuda")]
         {
@@ -631,7 +606,11 @@ impl<F: RichField, H: Hasher<F>> MerkleTree<F, H> {
 
             if use_gpu {
                 // Flatten leaves into 1D vector for GPU
-                let leaf_size = if leaves.is_empty() { 0 } else { leaves[0].len() };
+                let leaf_size = if leaves.is_empty() {
+                    0
+                } else {
+                    leaves[0].len()
+                };
                 let zeros = vec![F::ZERO; leaf_size];
                 let mut leaves_1d: Vec<F> = Vec::with_capacity(leaves.len() * leaf_size);
                 for leaf in &leaves {
@@ -642,7 +621,13 @@ impl<F: RichField, H: Hasher<F>> MerkleTree<F, H> {
                     }
                 }
 
-                fill_digests_buf_gpu::<F, H>(digests_buf, cap_buf, &leaves_1d, leaf_size, cap_height);
+                fill_digests_buf_gpu::<F, H>(
+                    digests_buf,
+                    cap_buf,
+                    &leaves_1d,
+                    leaf_size,
+                    cap_height,
+                );
             } else {
                 fill_digests_buf::<F, H>(digests_buf, cap_buf, &leaves[..], cap_height);
             }
@@ -652,7 +637,6 @@ impl<F: RichField, H: Hasher<F>> MerkleTree<F, H> {
         {
             fill_digests_buf::<F, H>(digests_buf, cap_buf, &leaves[..], cap_height);
         }
->>>>>>> zz-lighter/zz/cuda_integration
 
         unsafe {
             // SAFETY: `fill_digests_buf` or `fill_digests_buf_gpu` initialized the spare capacity up to
