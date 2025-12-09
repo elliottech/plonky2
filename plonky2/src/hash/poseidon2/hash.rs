@@ -1,5 +1,7 @@
 use core::fmt::Debug;
 
+use plonky2_field::ops::Square;
+
 use super::config::*;
 use super::gate::Poseidon2Gate;
 use crate::field::extension::{Extendable, FieldExtension};
@@ -13,6 +15,7 @@ use crate::plonk::circuit_builder::CircuitBuilder;
 use crate::plonk::config::{AlgebraicHasher, Hasher};
 
 pub trait Poseidon2: PrimeField64 {
+    #[inline]
     fn poseidon2(input: [Self; WIDTH]) -> [Self; WIDTH] {
         let mut state = input;
 
@@ -26,6 +29,7 @@ pub trait Poseidon2: PrimeField64 {
     }
 
     #[inline]
+    #[unroll::unroll_for_loops]
     fn full_rounds(state: &mut [Self; WIDTH], start: usize) {
         for r in start..(start + ROUNDS_F_HALF) {
             Self::add_rc(state, r);
@@ -35,6 +39,7 @@ pub trait Poseidon2: PrimeField64 {
     }
 
     #[inline]
+    #[unroll::unroll_for_loops]
     fn partial_rounds(state: &mut [Self; WIDTH]) {
         for r in 0..ROUNDS_P {
             state[0] += Self::from_canonical_u64(INTERNAL_CONSTANTS[r]);
@@ -44,29 +49,20 @@ pub trait Poseidon2: PrimeField64 {
     }
 
     #[inline]
+    #[unroll::unroll_for_loops]
     fn external_linear_layer(state: &mut [Self; WIDTH]) {
-        // First, we apply M_4 to each consecutive four elements of the state.
-        // In Appendix B's terminology, this replaces each x_i with x_i'.
-        for i in (0..WIDTH).step_by(4) {
-            // Would be nice to find a better way to do this.
-            let mut state_4 = [state[i], state[i + 1], state[i + 2], state[i + 3]];
-            Self::apply_mat4_mut(&mut state_4);
-            state[i..i + 4].clone_from_slice(&state_4);
-        }
-        // Now, we apply the outer circulant matrix (to compute the y_i values).
-
-        // We first precompute the four sums of every four elements.
-        let sums: [Self; 4] =
-            core::array::from_fn(|k| (0..WIDTH).step_by(4).map(|j| state[j + k]).sum::<Self>());
-
-        // The formula for each y_i involves 2x_i' term and x_j' terms for each j that equals i mod 4.
-        // In other words, we can add a single copy of x_i' to the appropriate one of our precomputed sums
+        let mut state_u128: [u128; WIDTH] = [0u128; WIDTH];
         for i in 0..WIDTH {
-            state[i] += sums[i % 4];
+            state_u128[i] = state[i].to_noncanonical_u64() as u128;
+        }
+        external_linear_layer_u128(&mut state_u128);
+        for i in 0..WIDTH {
+            state[i] = Self::from_noncanonical_u128_with_96_bits(state_u128[i]);
         }
     }
 
     #[inline]
+    #[unroll::unroll_for_loops]
     fn external_linear_layer_extension<F: FieldExtension<D, BaseField = Self>, const D: usize>(
         state: &mut [F; WIDTH],
     ) {
@@ -92,11 +88,12 @@ pub trait Poseidon2: PrimeField64 {
     }
 
     #[inline]
+    #[unroll::unroll_for_loops]
     fn internal_linear_layer(state: &mut [Self; WIDTH]) {
-        let sum: Self = state.iter().cloned().sum();
+        let sum = sum_12(state); // hard coded for WIDTH = 12
         for i in 0..WIDTH {
-            state[i] *= Self::from_canonical_u64(MATRIX_DIAG_12_U64[i]);
-            state[i] += sum;
+            state[i] =
+                sum.multiply_accumulate(state[i], Self::from_canonical_u64(MATRIX_DIAG_12_U64[i]));
         }
     }
 
@@ -104,28 +101,19 @@ pub trait Poseidon2: PrimeField64 {
     fn internal_linear_layer_extension<F: FieldExtension<D, BaseField = Self>, const D: usize>(
         state: &mut [F; WIDTH],
     ) {
-        let mut sum = state[0];
-        for i in 1..WIDTH {
-            sum += state[i];
-        }
-        for i in 0..WIDTH {
-            state[i] *= F::from_canonical_u64(MATRIX_DIAG_12_U64[i]);
-            state[i] += sum;
-        }
+        let sum: F = state.iter().cloned().sum();
+        state
+            .iter_mut()
+            .zip(MATRIX_DIAG_12_U64.iter())
+            .for_each(|(x, &m)| {
+                *x = sum.multiply_accumulate(*x, F::from_canonical_u64(m));
+            });
     }
 
-    #[inline]
-    fn add_rc(state: &mut [Self; WIDTH], external_round: usize) {
-        debug_assert!(external_round < EXTERNAL_CONSTANTS.len());
-
-        for i in 0..WIDTH {
-            unsafe {
-                state[i] = state[i].add_canonical_u64(EXTERNAL_CONSTANTS[external_round][i]);
-            }
-        }
-    }
+    fn add_rc(state: &mut [Self; WIDTH], external_round: usize);
 
     #[inline]
+    #[unroll::unroll_for_loops]
     fn add_rc_extension<F: FieldExtension<D, BaseField = Self>, const D: usize>(
         state: &mut [F; WIDTH],
         external_round: usize,
@@ -137,10 +125,7 @@ pub trait Poseidon2: PrimeField64 {
         }
     }
 
-    #[inline]
-    fn sbox(state: &mut [Self; WIDTH]) {
-        state.iter_mut().for_each(|a| *a = Self::sbox_p(a));
-    }
+    fn sbox(state: &mut [Self; WIDTH]);
 
     #[inline]
     fn sbox_extension<F: FieldExtension<D, BaseField = Self>, const D: usize>(
@@ -151,35 +136,11 @@ pub trait Poseidon2: PrimeField64 {
             .for_each(|a| *a = Self::sbox_p_extension(a));
     }
 
-    #[inline]
-    fn sbox_p(a: &Self) -> Self {
-        a.exp_u64(D)
-    }
+    fn sbox_p(a: &Self) -> Self;
+
+    fn sbox_p_extension<F: FieldExtension<D, BaseField = Self>, const D: usize>(a: &F) -> F;
 
     #[inline]
-    fn sbox_p_extension<F: FieldExtension<D, BaseField = Self>, const D: usize>(a: &F) -> F {
-        a.exp_u64(super::config::D)
-    }
-
-    // Multiply a 4-element vector x by:
-    // [ 2 3 1 1 ]
-    // [ 1 2 3 1 ]
-    // [ 1 1 2 3 ]
-    // [ 3 1 1 2 ].
-    // This is more efficient than the previous matrix.
-    fn apply_mat4_mut(x: &mut [Self; 4]) {
-        let t01 = x[0] + x[1];
-        let t23 = x[2] + x[3];
-        let t0123 = t01 + t23;
-        let t01123 = t0123 + x[1];
-        let t01233 = t0123 + x[3];
-        // The order here is important. Need to overwrite x[0] and x[2] after x[1] and x[3].
-        x[3] = t01233 + x[0].double(); // 3*x[0] + x[1] + x[2] + 2*x[3]
-        x[1] = t01123 + x[2].double(); // x[0] + 2*x[1] + 3*x[2] + x[3]
-        x[0] = t01123 + t01; // 2*x[0] + 3*x[1] + x[2] + x[3]
-        x[2] = t01233 + t23; // x[0] + x[1] + 2*x[2] + 3*x[3]
-    }
-
     fn apply_mat4_mut_extension<F: FieldExtension<D, BaseField = Self>, const D: usize>(
         x: &mut [F; 4],
     ) {
@@ -196,7 +157,8 @@ pub trait Poseidon2: PrimeField64 {
     }
 
     // In circuit functions
-
+    #[inline]
+    #[unroll::unroll_for_loops]
     fn external_linear_layer_circuit<const D: usize>(
         builder: &mut CircuitBuilder<Self, D>,
         state: &mut [ExtensionTarget<D>; WIDTH],
@@ -206,10 +168,7 @@ pub trait Poseidon2: PrimeField64 {
         // First, we apply M_4 to each consecutive four elements of the state.
         // In Appendix B's terminology, this replaces each x_i with x_i'.
         for i in (0..WIDTH).step_by(4) {
-            // Would be nice to find a better way to do this.
-            let mut state_4 = [state[i], state[i + 1], state[i + 2], state[i + 3]];
-            Self::apply_mat4_mut_circuit(builder, &mut state_4);
-            state[i..i + 4].clone_from_slice(&state_4);
+            Self::apply_mat4_mut_circuit(builder, (&mut state[i..i + 4]).try_into().unwrap());
         }
         // Now, we apply the outer circulant matrix (to compute the y_i values).
 
@@ -229,6 +188,8 @@ pub trait Poseidon2: PrimeField64 {
         }
     }
 
+    #[inline]
+    #[unroll::unroll_for_loops]
     fn apply_mat4_mut_circuit<const D: usize>(
         builder: &mut CircuitBuilder<Self, D>,
         x: &mut [ExtensionTarget<D>; 4],
@@ -251,6 +212,8 @@ pub trait Poseidon2: PrimeField64 {
         x[2] = builder.add_extension(t01233, t23); // x[0] + x[1] + 2*x[2] + 3*x[3]
     }
 
+    #[inline]
+    #[unroll::unroll_for_loops]
     fn matmul_m4_circuit<const D: usize>(
         builder: &mut CircuitBuilder<Self, D>,
         input: &mut [ExtensionTarget<D>; WIDTH],
@@ -278,6 +241,8 @@ pub trait Poseidon2: PrimeField64 {
         }
     }
 
+    #[inline]
+    #[unroll::unroll_for_loops]
     fn add_rc_circuit<const D: usize>(
         builder: &mut CircuitBuilder<Self, D>,
         input: &mut [ExtensionTarget<D>; WIDTH],
@@ -293,6 +258,8 @@ pub trait Poseidon2: PrimeField64 {
         }
     }
 
+    #[inline]
+    #[unroll::unroll_for_loops]
     fn sbox_circuit<const D: usize>(
         builder: &mut CircuitBuilder<Self, D>,
         input: &mut [ExtensionTarget<D>; WIDTH],
@@ -315,6 +282,8 @@ pub trait Poseidon2: PrimeField64 {
         builder.exp_u64_extension(input, super::config::D)
     }
 
+    #[inline]
+    #[unroll::unroll_for_loops]
     fn internal_linear_layer_circuit<const D: usize>(
         builder: &mut CircuitBuilder<Self, D>,
         input: &mut [ExtensionTarget<D>; WIDTH],
@@ -335,7 +304,106 @@ pub trait Poseidon2: PrimeField64 {
     }
 }
 
-impl Poseidon2 for F {}
+#[inline]
+#[unroll::unroll_for_loops]
+fn external_linear_layer_u128(state: &mut [u128; WIDTH]) {
+    // First, we apply M_4 to each consecutive four elements of the state.
+    // In Appendix B's terminology, this replaces each x_i with x_i'.
+    for i in (0..WIDTH).step_by(4) {
+        // Multiply a 4-element vector x by:
+        // [ 2 3 1 1 ]
+        // [ 1 2 3 1 ]
+        // [ 1 1 2 3 ]
+        // [ 3 1 1 2 ].
+        let t01 = state[i] + state[i + 1];
+        let t23 = state[i + 2] + state[i + 3];
+        let t0123 = t01 + t23;
+
+        let x0 = state[i];
+        let x2 = state[i + 2];
+
+        state[i] = t0123 + t01 + state[i + 1]; // 2*x[0] + 3*x[1] + x[2] + x[3]
+        state[i + 1] = t0123 + state[i + 1] + x2 + x2; // x[0] + 2*x[1] + 3*x[2] + x[3]
+        state[i + 2] = t0123 + t23 + state[i + 3]; // x[0] + x[1] + 2*x[2] + 3*x[3]
+        state[i + 3] = t0123 + state[i + 3] + x0 + x0; // 3*x[0] + x[1] + x[2] + 2*x[3]
+    }
+    // Now, we apply the outer circulant matrix (to compute the y_i values).
+
+    // We first precompute the four sums of every four elements.
+    let mut sums = [0u128; 4];
+    for i in 0..4 {
+        sums[i] = state[i] + state[i + 4] + state[i + 8];
+    }
+
+    // The formula for each y_i involves 2x_i' term and x_j' terms for each j that equals i mod 4.
+    // In other words, we can add a single copy of x_i' to the appropriate one of our precomputed sums
+    for i in 0..WIDTH {
+        state[i] += sums[i % 4];
+    }
+}
+
+impl Poseidon2 for F {
+    #[inline]
+    fn sbox_p(a: &Self) -> Self {
+        let a2 = a.square();
+        let a4 = a2.square();
+        let a3 = *a * a2;
+        a3 * a4
+    }
+
+    #[inline]
+    fn sbox_p_extension<F: FieldExtension<D, BaseField = Self>, const D: usize>(a: &F) -> F {
+        let a2 = a.square();
+        let a4 = a2.square();
+        let a3 = *a * a2;
+        a3 * a4
+    }
+
+    #[inline]
+    #[cfg(not(all(target_arch = "aarch64", target_feature = "neon")))]
+    fn add_rc(state: &mut [Self; WIDTH], external_round: usize) {
+        use plonky2_field::types::Field64;
+        debug_assert!(external_round < EXTERNAL_CONSTANTS.len());
+        state
+            .iter_mut()
+            .zip(EXTERNAL_CONSTANTS[external_round].iter())
+            .for_each(|(x, &m)| {
+                *x = unsafe { x.add_canonical_u64(m) };
+            });
+    }
+
+    #[inline]
+    #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
+    fn add_rc(state: &mut [Self; WIDTH], external_round: usize) {
+        debug_assert!(external_round < EXTERNAL_CONSTANTS.len());
+
+        unsafe {
+            use core::mem::transmute;
+
+            use crate::hash::arch::aarch64::poseidon_goldilocks_neon::vector_add;
+
+            let state_u64 = transmute::<[Self; WIDTH], [u64; WIDTH]>(*state);
+            let round_constants = &EXTERNAL_CONSTANTS[external_round];
+
+            let res = vector_add(&state_u64, round_constants);
+            *state = transmute::<[u64; WIDTH], [Self; WIDTH]>(res);
+        }
+    }
+
+    #[inline]
+    #[cfg(not(all(target_arch = "aarch64", target_feature = "neon")))]
+    fn sbox(state: &mut [Self; WIDTH]) {
+        state.iter_mut().for_each(|a| *a = Self::sbox_p(a));
+    }
+
+    #[inline(always)]
+    #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
+    fn sbox(state: &mut [Self; WIDTH]) {
+        unsafe {
+            crate::hash::arch::aarch64::poseidon_goldilocks_neon::sbox_layer(state);
+        }
+    }
+}
 
 #[derive(Copy, Clone, Default, Debug, PartialEq)]
 pub struct Poseidon2Permutation<T> {
@@ -405,6 +473,26 @@ impl<T: Copy + Debug + Default + Eq + Permuter + Send + Sync> PlonkyPermutation<
     }
 }
 
+#[inline]
+/// Sum of 12 elements to u128; unrolled for performance.
+fn sum_12<F: PrimeField64>(inputs: &[F]) -> F {
+    debug_assert!(inputs.len() == 12);
+    let tmp = inputs[0].to_noncanonical_u64() as u128
+        + inputs[1].to_noncanonical_u64() as u128
+        + inputs[2].to_noncanonical_u64() as u128
+        + inputs[3].to_noncanonical_u64() as u128
+        + inputs[4].to_noncanonical_u64() as u128
+        + inputs[5].to_noncanonical_u64() as u128
+        + inputs[6].to_noncanonical_u64() as u128
+        + inputs[7].to_noncanonical_u64() as u128
+        + inputs[8].to_noncanonical_u64() as u128
+        + inputs[9].to_noncanonical_u64() as u128
+        + inputs[10].to_noncanonical_u64() as u128
+        + inputs[11].to_noncanonical_u64() as u128;
+
+    F::from_noncanonical_u128_with_96_bits(tmp)
+}
+
 /// Poseidon2 hash function.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct Poseidon2Hash;
@@ -423,6 +511,8 @@ impl<F: RichField + Poseidon2> Hasher<F> for Poseidon2Hash {
 }
 
 impl Poseidon2Hash {
+    #[inline]
+    #[unroll::unroll_for_loops]
     pub fn hash_n_to_one(
         input: &[<Poseidon2Hash as Hasher<F>>::Hash],
     ) -> <Poseidon2Hash as Hasher<F>>::Hash {

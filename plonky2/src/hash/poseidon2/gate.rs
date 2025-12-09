@@ -1,6 +1,5 @@
 //! Implementation of a Plonky2 gate for an entire Poseidon2 permutation over a
 //! state of width 12
-
 use core::marker::PhantomData;
 
 use anyhow::Result;
@@ -495,10 +494,13 @@ impl<F: RichField + Extendable<D> + Poseidon2, const D: usize> SimpleGenerator<F
 mod tests {
     use anyhow::Result;
 
-    use super::Poseidon2Gate;
+    use super::{Poseidon2Gate, *};
     use crate::field::goldilocks_field::GoldilocksField;
     use crate::gates::gate_testing::{test_eval_fns, test_low_degree};
     use crate::gates::poseidon::PoseidonGate;
+    use crate::iop::generator::generate_partial_witness;
+    use crate::iop::witness::PartialWitness;
+    use crate::plonk::circuit_data::CircuitConfig;
     use crate::plonk::config::{GenericConfig, Poseidon2GoldilocksConfig};
 
     #[test]
@@ -513,6 +515,67 @@ mod tests {
         assert_eq!(Gate::WIRE_SWAP, 24);
         assert_eq!(Gate::wire_delta(0), 25);
         assert_eq!(Gate::wire_delta(3), 28);
+        assert_eq!(Gate::wire_full_sbox_0(1, 0), 29);
+        assert_eq!(Gate::wire_full_sbox_0(3, 0), 53);
+        assert_eq!(Gate::wire_full_sbox_0(3, 11), 64);
+        assert_eq!(Gate::wire_partial_sbox(0), 65);
+        assert_eq!(Gate::wire_partial_sbox(21), 86);
+        assert_eq!(Gate::wire_full_sbox_1(0, 0), 87);
+        assert_eq!(Gate::wire_full_sbox_1(3, 0), 123);
+        assert_eq!(Gate::wire_full_sbox_1(3, 11), 134);
+    }
+
+    #[test]
+    fn generated_output() {
+        const D: usize = 2;
+        type C = Poseidon2GoldilocksConfig;
+        type F = <C as GenericConfig<D>>::F;
+
+        let config = CircuitConfig {
+            num_wires: 143,
+            ..CircuitConfig::standard_recursion_config()
+        };
+        let mut builder = CircuitBuilder::new(config);
+        type Gate = Poseidon2Gate<F, D>;
+        let gate = Gate::new();
+        let row = builder.add_gate(gate, vec![]);
+        let circuit = builder.build_prover::<C>();
+
+        let permutation_inputs = (0..WIDTH).map(F::from_canonical_usize).collect::<Vec<_>>();
+
+        let mut inputs = PartialWitness::new();
+        inputs
+            .set_wire(
+                Wire {
+                    row,
+                    column: Gate::WIRE_SWAP,
+                },
+                F::ZERO,
+            )
+            .unwrap();
+        for i in 0..WIDTH {
+            inputs
+                .set_wire(
+                    Wire {
+                        row,
+                        column: Gate::wire_input(i),
+                    },
+                    permutation_inputs[i],
+                )
+                .unwrap();
+        }
+
+        let witness =
+            generate_partial_witness(inputs, &circuit.prover_only, &circuit.common).unwrap();
+
+        let expected_outputs: [F; WIDTH] = F::poseidon2(permutation_inputs.try_into().unwrap());
+        for i in 0..WIDTH {
+            let out = witness.get_wire(Wire {
+                row: 0,
+                column: Gate::wire_output(i),
+            });
+            assert_eq!(out, expected_outputs[i]);
+        }
     }
 
     #[test]
