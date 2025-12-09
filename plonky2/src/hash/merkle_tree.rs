@@ -1,27 +1,27 @@
-#[cfg(feature = "cuda")]
-use alloc::sync::Arc;
-#[cfg(not(feature = "std"))]
-use alloc::vec::Vec;
 use core::mem::MaybeUninit;
 use core::slice;
 use std::collections::HashSet;
 #[cfg(feature = "cuda")]
+use std::sync::Arc;
+#[cfg(feature = "cuda")]
 use std::sync::Mutex;
 use std::time::Instant;
+#[cfg(not(feature = "std"))]
+use std::vec::Vec;
 
-#[cfg(feature = "cuda")]
-use cryptography_cuda::device::memory::HostOrDeviceSlice;
-#[cfg(feature = "cuda")]
-use cryptography_cuda::device::stream::CudaStream;
-#[cfg(feature = "cuda")]
-use cryptography_cuda::merkle::bindings::{
-    fill_digests_buf_linear_gpu_with_gpu_ptr, fill_digests_buf_linear_multigpu_with_gpu_ptr,
-};
 use num::range;
 #[cfg(feature = "cuda")]
 use once_cell::sync::Lazy;
 use plonky2_maybe_rayon::*;
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "cuda")]
+use zeknox::device::memory::HostOrDeviceSlice;
+#[cfg(feature = "cuda")]
+use zeknox::device::stream::CudaStream;
+#[cfg(feature = "cuda")]
+use zeknox::merkle::bindings::{
+    fill_digests_buf_linear_gpu_with_gpu_ptr, fill_digests_buf_linear_multigpu_with_gpu_ptr,
+};
 
 use crate::hash::hash_types::RichField;
 #[cfg(feature = "cuda")]
@@ -842,9 +842,7 @@ mod tests {
     use super::*;
     use crate::field::extension::Extendable;
     use crate::hash::merkle_proofs::verify_merkle_proof_to_cap;
-    use crate::plonk::config::{
-        GenericConfig, KeccakGoldilocksConfig, PoseidonGoldilocksConfig,
-    };
+    use crate::plonk::config::{GenericConfig, KeccakGoldilocksConfig, PoseidonGoldilocksConfig};
 
     fn random_data<F: RichField>(n: usize, k: usize) -> Vec<Vec<F>> {
         (0..n).map(|_| F::rand_vec(k)).collect()
@@ -1189,7 +1187,7 @@ mod tests {
 
         Ok(())
     }
-    
+
     #[test]
     fn test_merkle_trees_keccak() -> Result<()> {
         const D: usize = 2;
