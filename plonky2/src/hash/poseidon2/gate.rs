@@ -498,6 +498,7 @@ mod tests {
     use super::Poseidon2Gate;
     use crate::field::goldilocks_field::GoldilocksField;
     use crate::gates::gate_testing::{test_eval_fns, test_low_degree};
+    use crate::gates::poseidon::PoseidonGate;
     use crate::plonk::config::{GenericConfig, Poseidon2GoldilocksConfig};
 
     #[test]
@@ -518,6 +519,9 @@ mod tests {
     fn low_degree() {
         type F = GoldilocksField;
         let gate = Poseidon2Gate::<F, 4>::new();
+        test_low_degree(gate);
+
+        let gate = PoseidonGate::<F, 4>::new();
         test_low_degree(gate)
     }
 
@@ -526,6 +530,9 @@ mod tests {
         const D: usize = 2;
         type C = Poseidon2GoldilocksConfig;
         type F = <C as GenericConfig<D>>::F;
+        let gate = Poseidon2Gate::<F, D>::new();
+        test_eval_fns::<F, C, _, D>(gate)?;
+
         let gate = Poseidon2Gate::<F, D>::new();
         test_eval_fns::<F, C, _, D>(gate)
     }
