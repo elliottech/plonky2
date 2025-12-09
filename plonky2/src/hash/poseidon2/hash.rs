@@ -367,7 +367,7 @@ impl Poseidon2 for F {
             .iter_mut()
             .zip(EXTERNAL_CONSTANTS[external_round].iter())
             .for_each(|(x, &m)| {
-                *x += Self::from_canonical_u64(m);
+                *x = x.add_canonical_u64(m);
             });
     }
 
