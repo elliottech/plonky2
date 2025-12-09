@@ -497,6 +497,7 @@ mod tests {
     use super::{Poseidon2Gate, *};
     use crate::field::goldilocks_field::GoldilocksField;
     use crate::gates::gate_testing::{test_eval_fns, test_low_degree};
+    use crate::gates::poseidon::PoseidonGate;
     use crate::iop::generator::generate_partial_witness;
     use crate::iop::witness::PartialWitness;
     use crate::plonk::circuit_data::CircuitConfig;
@@ -581,6 +582,9 @@ mod tests {
     fn low_degree() {
         type F = GoldilocksField;
         let gate = Poseidon2Gate::<F, 4>::new();
+        test_low_degree(gate);
+
+        let gate = PoseidonGate::<F, 4>::new();
         test_low_degree(gate)
     }
 
@@ -590,6 +594,9 @@ mod tests {
         type C = Poseidon2GoldilocksConfig;
         type F = <C as GenericConfig<D>>::F;
         let gate = Poseidon2Gate::<F, D>::new();
+        test_eval_fns::<F, C, _, D>(gate)?;
+
+        let gate = PoseidonGate::<F, D>::new();
         test_eval_fns::<F, C, _, D>(gate)
     }
 }

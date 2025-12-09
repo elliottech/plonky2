@@ -4,4 +4,3 @@ pub mod hash;
 
 #[cfg(test)]
 pub mod p3;
-pub mod pure;

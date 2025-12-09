@@ -358,6 +358,7 @@ pub trait Field:
 
     fn from_noncanonical_u128_with_96_bits(n: u128) -> Self {
         // Default implementation.
+        debug_assert!(n < (1u128 << 96));
         Self::from_noncanonical_u128(n)
     }
 

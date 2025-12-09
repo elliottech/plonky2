@@ -161,6 +161,7 @@ impl Field for GoldilocksField {
     }
 
     fn from_noncanonical_u128_with_96_bits(n: u128) -> Self {
+        debug_assert!(n < (1u128 << 96));
         reduce128_with_96_bits(n)
     }
 
