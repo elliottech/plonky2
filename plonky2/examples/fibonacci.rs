@@ -29,33 +29,33 @@ fn main() -> Result<()> {
     let initial_b = builder.add_virtual_target();
     let mut prev_target = initial_a;
     let mut cur_target = initial_b;
-    for _ in 0..9999999 {
+    for _ in 0..2999999 {
         let temp = builder.add(prev_target, cur_target);
         prev_target = cur_target;
         cur_target = temp;
     }
     println!("Circuit built.");
 
-    #[cfg(feature = "cuda")]
-    {
-        zeknox::clear_cuda_errors_rs();
-        println!("Initializing CUDA twiddle factors...");
-        // Initialize twiddle factors for all dimensions that will be used
-        // This test involves multiple polynomials and recursive verification,
-        // so we initialize a wider range of dimensions to be safe
-        // for i in 0..=19 {
-        //     zeknox::init_twiddle_factors_rs(0, i);
-        // }
+    // #[cfg(feature = "cuda")]
+    // {
+    //     zeknox::clear_cuda_errors_rs();
+    //     println!("Initializing CUDA twiddle factors...");
+    //     // Initialize twiddle factors for all dimensions that will be used
+    //     // This test involves multiple polynomials and recursive verification,
+    //     // so we initialize a wider range of dimensions to be safe
+    //     // for i in 0..=19 {
+    //     //     zeknox::init_twiddle_factors_rs(0, i);
+    //     // }
 
-        zeknox::init_twiddle_factors_rs(0, 19);
-        zeknox::init_twiddle_factors_rs(0, 22);
-        // Initialize coset on GPU
-        // For Goldilocks field, the coset generator is 7 (MULTIPLICATIVE_GROUP_GENERATOR)
-        // TODO: Make this generic for other fields if needed
-        let coset_gen_u64 = 7u64;
-        zeknox::init_coset_rs(0, 22, coset_gen_u64);
-        // zeknox::init_coset_rs(0, 16, coset_gen_u64);
-    }
+    //     zeknox::init_twiddle_factors_rs(0, 19);
+    //     zeknox::init_twiddle_factors_rs(0, 22);
+    //     // Initialize coset on GPU
+    //     // For Goldilocks field, the coset generator is 7 (MULTIPLICATIVE_GROUP_GENERATOR)
+    //     // TODO: Make this generic for other fields if needed
+    //     let coset_gen_u64 = 7u64;
+    //     zeknox::init_coset_rs(0, 22, coset_gen_u64);
+    //     // zeknox::init_coset_rs(0, 16, coset_gen_u64);
+    // }
 
     // Public inputs are the two initial values (provided below) and the result (which is generated).
     builder.register_public_input(initial_a);

@@ -281,10 +281,16 @@ fn fill_digests_buf_gpu<F: RichField, H: Hasher<F>>(
     if *gpu_id_lock >= num_gpus as u64 {
         *gpu_id_lock = 0;
     }
+    println!("Using GPU id {} leave length {}", gpu_id, leaves.len());
 
     let now = Instant::now();
-    let mut gpu_leaves_buf: HostOrDeviceSlice<'_, F> =
-        HostOrDeviceSlice::cuda_malloc(gpu_id as i32, leaves.len()).unwrap();
+    let gpu_leaves_buf_result = HostOrDeviceSlice::cuda_malloc(gpu_id as i32, leaves.len());
+
+    if gpu_leaves_buf_result.is_err() {
+        panic!("CUDA malloc failed, falling back to CPU for Merkle tree generation");
+    }
+
+    let mut gpu_leaves_buf = gpu_leaves_buf_result.unwrap();
     print_time(now, "alloc gpu leaves buffer");
 
     let now = Instant::now();
