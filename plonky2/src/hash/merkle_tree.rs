@@ -19,7 +19,7 @@ use zeknox::device::memory::HostOrDeviceSlice;
 #[cfg(feature = "cuda")]
 use zeknox::device::stream::CudaStream;
 #[cfg(feature = "cuda")]
-use zeknox::merkle::bindings::{
+use zeknox::{
     fill_digests_buf_linear_gpu_with_gpu_ptr, fill_digests_buf_linear_multigpu_with_gpu_ptr,
 };
 
