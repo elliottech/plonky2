@@ -363,7 +363,7 @@ impl<F: RichField + Extendable<D> + Poseidon2, const D: usize> Gate<F, D> for Po
     }
 
     fn num_constants(&self) -> usize {
-        1
+        0
     }
 
     fn degree(&self) -> usize {
