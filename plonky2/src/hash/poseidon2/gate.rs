@@ -533,7 +533,7 @@ mod tests {
         let gate = Poseidon2Gate::<F, D>::new();
         test_eval_fns::<F, C, _, D>(gate)?;
 
-        let gate = Poseidon2Gate::<F, D>::new();
+        let gate = PoseidonGate::<F, D>::new();
         test_eval_fns::<F, C, _, D>(gate)
     }
 }
