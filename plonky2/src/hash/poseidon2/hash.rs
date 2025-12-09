@@ -362,6 +362,7 @@ impl Poseidon2 for F {
     #[inline]
     #[cfg(not(all(target_arch = "aarch64", target_feature = "neon")))]
     fn add_rc(state: &mut [Self; WIDTH], external_round: usize) {
+        use plonky2_field::types::Field64;
         debug_assert!(external_round < EXTERNAL_CONSTANTS.len());
         state
             .iter_mut()
