@@ -445,7 +445,6 @@ impl<F: Field> Mul for &PolynomialCoeffs<F> {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Instant;
 
     use rand::rngs::OsRng;
     use rand::Rng;
@@ -625,10 +624,9 @@ mod tests {
     // Test to see which polynomial division method is faster for divisions of the type
     // `(X^n - 1)/(X - a)
     #[test]
+    #[cfg(not(feature = "cuda"))]
     fn test_division_linear() {
-
-        #[cfg(feature = "cuda")]
-        init_gpu_for_tests();
+        use std::time::Instant;
 
         type F = GoldilocksField;
         let mut rng = OsRng;

@@ -77,10 +77,10 @@ fn fft_dispatch_cpu<F: Field>(
     root_table: Option<&FftRootTable<F>>,
 ) {
     if root_table.is_some() {
-        return fft_classic(input, zero_factor.unwrap_or(0), root_table.unwrap());
+        fft_classic(input, zero_factor.unwrap_or(0), root_table.unwrap())
     } else {
         let computed = fft_root_table::<F>(input.len());
-        return fft_classic(input, zero_factor.unwrap_or(0), computed.as_ref());
+        fft_classic(input, zero_factor.unwrap_or(0), computed.as_ref())
     };
 }
 
@@ -92,11 +92,11 @@ fn fft_dispatch<F: Field>(
 ) {
     #[cfg(feature = "cuda")]
     {
-        return fft_dispatch_gpu(input, zero_factor, root_table);
+        fft_dispatch_gpu(input, zero_factor, root_table)
     }
     #[cfg(not(feature = "cuda"))]
     {
-        return fft_dispatch_cpu(input, zero_factor, root_table);
+        fft_dispatch_cpu(input, zero_factor, root_table)
     }
 }
 
