@@ -36,8 +36,8 @@ use crate::util::log2_strict;
 pub static GPU_ID: Lazy<Arc<Mutex<u64>>> = Lazy::new(|| Arc::new(Mutex::new(0)));
 
 #[cfg(feature = "cuda")]
-fn print_time(now: Instant, msg: &str) {
-    println!("Time {} {} ms", msg, now.elapsed().as_millis());
+fn print_time(_now: Instant, _msg: &str) {
+    // println!("Time {} {} ms", _msg, _now.elapsed().as_millis());
 }
 
 #[cfg(not(feature = "cuda"))]
@@ -525,6 +525,7 @@ impl<F: RichField, H: Hasher<F>> MerkleTree<F, H> {
                 }
             }
         }
+
 
         unsafe {
             // SAFETY: `fill_digests_buf` and `cap` initialized the spare capacity up to
