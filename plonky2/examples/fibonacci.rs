@@ -1,11 +1,9 @@
 use anyhow::{Ok, Result};
-use log::Level;
 use plonky2::field::types::Field;
 use plonky2::iop::witness::{PartialWitness, WitnessWrite};
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 use plonky2::plonk::circuit_data::CircuitConfig;
 use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
-use plonky2::util::timing::TimingTree;
 
 /// An example of using Plonky2 to prove a statement of the form
 /// "I know the 100th element of the Fibonacci sequence, starting with constants a and b."
@@ -40,39 +38,15 @@ fn main() -> Result<()> {
 
     #[cfg(feature = "cuda")]
     {
-        use plonky2_field::fft;
-        use plonky2_field::goldilocks_field::GoldilocksField;
-        use plonky2_field::polynomial::PolynomialCoeffs;
-
         zeknox::clear_cuda_errors_rs();
         println!("Initializing CUDA twiddle factors...");
-        // Initialize twiddle factors for all dimensions that will be used
-        // This test involves multiple polynomials and recursive verification,
-        // so we initialize a wider range of dimensions to be safe
-        // for i in 0..=19 {
-        //     zeknox::init_twiddle_factors_rs(0, i);
-        // }
 
         zeknox::init_twiddle_factors_rs(0, size);
         zeknox::init_twiddle_factors_rs(0, size + 3);
         // Initialize coset on GPU
         // For Goldilocks field, the coset generator is 7 (MULTIPLICATIVE_GROUP_GENERATOR)
-        // TODO: Make this generic for other fields if needed
         let coset_gen_u64 = 7u64;
         zeknox::init_coset_rs(0, size + 3, coset_gen_u64);
-
-        // warm up GPU
-        // for some reason the first 10 FFTs are somewhat buggy
-
-        for i in 0..10 {
-            let t = (0..1 << size)
-                .map(|x| GoldilocksField::from_canonical_u64(i * x as u64))
-                .collect();
-            let poly = PolynomialCoeffs::new(t);
-            let _ = plonky2_field::fft::fft(poly.clone());
-        }
-        println!("CUDA twiddle factors initialized.");
-        // zeknox::init_coset_rs(0, 16, coset_gen_u64);
     }
 
     // Public inputs are the two initial values (provided below) and the result (which is generated).

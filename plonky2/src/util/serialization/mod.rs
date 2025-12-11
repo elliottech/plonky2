@@ -324,7 +324,6 @@ pub trait Read {
         let leaf_len = self.read_usize()?;
         let mut leaves_2d = Vec::with_capacity(leaves_len * leaf_len);
         for _ in 0..leaves_len {
-            // let leaf_len = self.read_usize()?;
             leaves_2d.push(self.read_field_vec(leaf_len)?);
         }
 
@@ -1426,7 +1425,6 @@ pub trait Write {
         self.write_usize(leaves_count)?;
         self.write_usize(tree.leaf_size)?;
         for i in 0..leaves_count {
-            // self.write_usize(tree.leaf_size)?;
             self.write_field_vec(&tree.get(i))?;
         }
         self.write_hash_vec::<F, H>(&tree.digests)?;

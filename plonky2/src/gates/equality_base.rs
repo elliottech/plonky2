@@ -160,7 +160,6 @@ impl<F: RichField + Extendable<D>, const D: usize> Gate<F, D> for EqualityGate {
                 )
             })
             .collect();
-        //println!("generators {:?}", result.len());
         result
     }
 
