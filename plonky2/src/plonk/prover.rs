@@ -244,7 +244,7 @@ where
     } else {
         zs_partial_products
     };
-    
+
     let partial_products_zs_and_lookup_commitment = timed!(
         timing,
         "commit to partial products, Z's and, if any, lookup polynomials",
@@ -305,7 +305,7 @@ where
             prover_data.fft_root_table.as_ref(),
         )
     );
-    
+
     challenger.observe_cap::<C::Hasher>(&quotient_polys_commitment.merkle_tree.cap);
 
     let zeta = challenger.get_extension_challenge::<D>();

@@ -41,6 +41,7 @@ fn print_time(now: Instant, msg: &str) {
 }
 
 #[cfg(not(feature = "cuda"))]
+#[allow(dead_code)]
 fn print_time(_now: Instant, _msg: &str) {}
 
 #[cfg(feature = "cuda")]
@@ -524,7 +525,6 @@ impl<F: RichField, H: Hasher<F>> MerkleTree<F, H> {
                 }
             }
         }
-
 
         unsafe {
             // SAFETY: `fill_digests_buf` and `cap` initialized the spare capacity up to

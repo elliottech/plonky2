@@ -3,7 +3,6 @@
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 
-use plonky2_maybe_rayon::*;
 #[doc(inline)]
 pub use plonky2_util::*;
 #[cfg(feature = "cuda")]

@@ -34,10 +34,10 @@ fn main() -> Result<()> {
     }
     println!("Circuit built.");
 
-    let size = 16;
-
     #[cfg(feature = "cuda")]
     {
+        let size = 16;
+
         zeknox::clear_cuda_errors_rs();
         println!("Initializing CUDA twiddle factors...");
 
