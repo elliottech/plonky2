@@ -55,10 +55,13 @@ impl<F: Field> PolynomialValues<F> {
         self.values.len()
     }
 
+    /// Adaptive IFFT: uses GPU if available, otherwise CPU.
     pub fn ifft(self) -> PolynomialCoeffs<F> {
         ifft(self)
     }
 
+    /// Enfored to use CPU IFFT.
+    /// Used for bypass the GPU issue during setup phase.
     pub fn ifft_cpu(self) -> PolynomialCoeffs<F> {
         ifft_cpu(self)
     }

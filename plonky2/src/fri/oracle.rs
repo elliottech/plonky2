@@ -125,20 +125,7 @@ impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>
         );
 
         let mut leaves = timed!(timing, "transpose LDEs", transpose(&lde_values));
-        // Debug: Print first leaf for determinism check
-        if !leaves.is_empty() && !leaves[0].is_empty() {
-            println!(
-                "First leaf before reverse_bits: {:?}",
-                &leaves[0][..4.min(leaves[0].len())]
-            );
-        }
         reverse_index_bits_in_place(&mut leaves);
-        if !leaves.is_empty() && !leaves[0].is_empty() {
-            println!(
-                "First leaf after reverse_bits: {:?}",
-                &leaves[0][..4.min(leaves[0].len())]
-            );
-        }
         let merkle_tree = timed!(
             timing,
             "build Merkle tree",

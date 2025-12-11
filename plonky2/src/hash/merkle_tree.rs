@@ -484,9 +484,43 @@ impl<F: RichField, H: Hasher<F>> MerkleTree<F, H> {
 
         let digests_buf = capacity_up_to_mut(&mut digests, num_digests);
         let cap_buf = capacity_up_to_mut(&mut cap, len_cap);
-        let now = Instant::now();
+
+        #[cfg(feature = "cuda_sanity_check")]
+        let (digests_buf_cpu, cap_cpu) = {
+            let mut digests_buf_cpu = digests_buf.to_vec();
+            let mut cap_buf_cpu = cap_buf.to_vec();
+
+            fill_digests_buf::<F, H>(
+                &mut digests_buf_cpu,
+                &mut cap_buf_cpu,
+                &leaves_1d.clone(),
+                leaf_size,
+                cap_height,
+            );
+
+            (digests_buf_cpu, cap_buf_cpu)
+        };
+
         fill_digests_buf_meta::<F, H>(digests_buf, cap_buf, &leaves_1d, leaf_size, cap_height);
-        print_time(now, "fill digests buffer");
+
+        #[cfg(feature = "cuda_sanity_check")]
+        {
+            for i in 0..num_digests {
+                unsafe {
+                    let hash1 = digests_buf[i].assume_init();
+                    let hash2 = digests_buf_cpu[i].assume_init();
+                    assert_eq!(hash1, hash2, "Digest mismatch at index {}", i);
+                }
+            }
+            for i in 0..len_cap {
+                unsafe {
+                    let hash1 = cap_buf[i].assume_init();
+                    let hash2 = cap_cpu[i].assume_init();
+                    assert_eq!(hash1, hash2, "Cap mismatch at index {}", i);
+                }
+            }
+        }
+
 
         unsafe {
             // SAFETY: `fill_digests_buf` and `cap` initialized the spare capacity up to
@@ -494,16 +528,6 @@ impl<F: RichField, H: Hasher<F>> MerkleTree<F, H> {
             digests.set_len(num_digests);
             cap.set_len(len_cap);
         }
-        /*
-        println!{"Digest Buffer"};
-        for dg in &digests {
-            println!("{:?}", dg);
-        }
-        println!{"Cap Buffer"};
-        for dg in &cap {
-            println!("{:?}", dg);
-        }
-        */
         Self {
             leaves: leaves_1d,
             leaf_size,
