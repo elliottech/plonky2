@@ -32,7 +32,6 @@ pub fn fft_root_table<F: Field>(n: usize) -> FftRootTable<F> {
     root_table
 }
 
-#[allow(dead_code)]
 #[cfg(feature = "cuda")]
 fn fft_dispatch_gpu<F: Field>(
     input: &mut [F],
@@ -297,14 +296,6 @@ mod tests {
         type F = GoldilocksField;
         let degree = 200usize;
         let degree_padded = degree.next_power_of_two();
-        println!("Initializing CUDA");
-
-        #[cfg(feature = "cuda")]
-        for i in 8..=12 {
-            zeknox::init_twiddle_factors_rs(0, i);
-        }
-
-        println!("Testing fft/ifft with degree {}", degree);
 
         // Create a vector of coeffs; the first degree of them are
         // "random", the last degree_padded-degree of them are zero.
@@ -326,7 +317,6 @@ mod tests {
             assert_eq!(interpolated_coefficients.coeffs[i], F::ZERO);
         }
 
-        println!("Testing ldes");
         for r in 0..4 {
             // expand coefficients by factor 2^r by filling with zeros
             let zero_tail = coefficients.lde(r);

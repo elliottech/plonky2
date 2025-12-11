@@ -79,7 +79,6 @@ impl Sample for Secp256K1Scalar {
 }
 
 impl Field for Secp256K1Scalar {
-
     const ZERO: Self = Self([0; 4]);
     const ONE: Self = Self([1, 0, 0, 0]);
     const TWO: Self = Self([2, 0, 0, 0]);

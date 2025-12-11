@@ -1225,10 +1225,11 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
         let max_fft_points = 1 << (degree_bits + max(rate_bits, log2_ceil(quotient_degree_factor)));
         let fft_root_table = fft_root_table(max_fft_points);
 
-        println!("start to commit");
+        // This part of the code on GPU is buggy. So we use CPU for computation.
+        // It does not impact performance as this is only done once during setup.
         let constants_sigmas_commitment = if commit_to_sigma {
             let constants_sigmas_vecs = [constant_vecs, sigma_vecs.clone()].concat();
-            PolynomialBatch::<F, C, D>::from_values(
+            PolynomialBatch::<F, C, D>::preprocessor_from_values(
                 constants_sigmas_vecs,
                 rate_bits,
                 PlonkOracle::CONSTANTS_SIGMAS.blinding,
@@ -1239,7 +1240,6 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
         } else {
             PolynomialBatch::<F, C, D>::default()
         };
-        println!("end commit");
 
         // Map between gates where not all generators are used and the gate's number of used generators.
         let incomplete_gates = self

@@ -54,6 +54,36 @@ impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>
     PolynomialBatch<F, C, D>
 {
     /// Creates a list polynomial commitment for the polynomials interpolating the values in `values`.
+    /// This function is called by the builder during preprocessing the circuit.
+    /// We use parallel IFFT on CPU here to avoid strange GPU issue.
+    pub fn preprocessor_from_values(
+        values: Vec<PolynomialValues<F>>,
+        rate_bits: usize,
+        blinding: bool,
+        cap_height: usize,
+        timing: &mut TimingTree,
+        fft_root_table: Option<&FftRootTable<F>>,
+    ) -> Self {
+        let coeffs = timed!(
+            timing,
+            "IFFT",
+            values
+                .into_par_iter()
+                .map(|v| v.ifft_cpu())
+                .collect::<Vec<_>>()
+        );
+
+        Self::from_coeffs(
+            coeffs,
+            rate_bits,
+            blinding,
+            cap_height,
+            timing,
+            fft_root_table,
+        )
+    }
+
+    /// Creates a list polynomial commitment for the polynomials interpolating the values in `values`.
     pub fn from_values(
         values: Vec<PolynomialValues<F>>,
         rate_bits: usize,
@@ -62,12 +92,10 @@ impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>
         timing: &mut TimingTree,
         fft_root_table: Option<&FftRootTable<F>>,
     ) -> Self {
-        println!("using slow ifft_cpu");
         let coeffs = timed!(
             timing,
             "IFFT",
-            // Use sequential iteration for deterministic results
-            values.into_iter().map(|v| v.ifft_cpu()).collect::<Vec<_>>()
+            values.into_par_iter().map(|v| v.ifft()).collect::<Vec<_>>()
         );
 
         Self::from_coeffs(
