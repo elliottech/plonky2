@@ -521,7 +521,6 @@ impl<F: RichField, H: Hasher<F>> MerkleTree<F, H> {
             }
         }
 
-
         unsafe {
             // SAFETY: `fill_digests_buf` and `cap` initialized the spare capacity up to
             // `num_digests` and `len_cap`, resp.

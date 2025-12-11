@@ -293,6 +293,17 @@ mod tests {
 
     #[test]
     fn fft_and_ifft() {
+        #[cfg(feature = "cuda")]
+        {
+            zeknox::clear_cuda_errors_rs();
+            // Initialize twiddle factors for sizes we'll use
+            // degree_padded is 256 = 2^8
+            // lde then add 4 more bits
+            for i in 8..=12 {
+                zeknox::init_twiddle_factors_rs(0, i);
+            }
+        }
+
         type F = GoldilocksField;
         let degree = 200usize;
         let degree_padded = degree.next_power_of_two();

@@ -454,6 +454,17 @@ mod tests {
     use crate::goldilocks_field::GoldilocksField;
     use crate::types::Sample;
 
+    #[cfg(feature = "cuda")]
+    fn init_gpu_for_tests() {
+        zeknox::clear_cuda_errors_rs();
+        // Initialize twiddle factors for various sizes
+        for i in 0..=20 {
+            zeknox::init_twiddle_factors_rs(0, i);
+        }
+        let coset_gen_u64 = 7u64;
+        zeknox::init_coset_rs(0, 20, coset_gen_u64);
+    }
+
     #[test]
     fn test_trimmed() {
         type F = GoldilocksField;
@@ -482,6 +493,9 @@ mod tests {
 
     #[test]
     fn test_coset_fft() {
+        #[cfg(feature = "cuda")]
+        init_gpu_for_tests();
+
         type F = GoldilocksField;
 
         let k = 8;
@@ -503,6 +517,9 @@ mod tests {
 
     #[test]
     fn test_coset_ifft() {
+        #[cfg(feature = "cuda")]
+        init_gpu_for_tests();
+
         type F = GoldilocksField;
 
         let k = 8;
@@ -609,6 +626,10 @@ mod tests {
     // `(X^n - 1)/(X - a)
     #[test]
     fn test_division_linear() {
+
+        #[cfg(feature = "cuda")]
+        init_gpu_for_tests();
+
         type F = GoldilocksField;
         let mut rng = OsRng;
         let l = 14;
