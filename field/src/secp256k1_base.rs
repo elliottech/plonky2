@@ -98,6 +98,13 @@ impl Field for Secp256K1Base {
 
     const BITS: usize = 256;
 
+    fn to_u64(&self) -> u64 {
+        unimplemented!()
+    }
+    fn from_u64(u: u64) -> Self {
+        unimplemented!()
+    }
+
     fn order() -> BigUint {
         BigUint::from_slice(&[
             0xFFFFFC2F, 0xFFFFFFFE, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF,

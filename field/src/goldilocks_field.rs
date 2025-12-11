@@ -68,6 +68,13 @@ impl Sample for GoldilocksField {
 }
 
 impl Field for GoldilocksField {
+    fn to_u64(&self) -> u64 {
+        self.0
+    }
+    fn from_u64(u: u64) -> Self {
+        Self(u)
+    }
+
     const ZERO: Self = Self(0);
     const ONE: Self = Self(1);
     const TWO: Self = Self(2);

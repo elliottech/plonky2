@@ -62,11 +62,12 @@ impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>
         timing: &mut TimingTree,
         fft_root_table: Option<&FftRootTable<F>>,
     ) -> Self {
+        println!("using slow ifft_cpu");
         let coeffs = timed!(
             timing,
             "IFFT",
             // Use sequential iteration for deterministic results
-            values.into_iter().map(|v| v.ifft()).collect::<Vec<_>>()
+            values.into_iter().map(|v| v.ifft_cpu()).collect::<Vec<_>>()
         );
 
         Self::from_coeffs(

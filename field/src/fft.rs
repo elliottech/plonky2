@@ -32,16 +32,111 @@ pub fn fft_root_table<F: Field>(n: usize) -> FftRootTable<F> {
     root_table
 }
 
+#[allow(dead_code)]
+#[cfg(feature = "cuda")]
+fn fft_dispatch_gpu<F: Field>(
+    input: &mut [F],
+    zero_factor: Option<usize>,
+    root_table: Option<&FftRootTable<F>>,
+) {
+    if F::CUDA_SUPPORT {
+        use zeknox::device::memory::HostOrDeviceSlice;
+        use zeknox::ntt_batch;
+        use zeknox::types::NTTConfig;
+
+        // let mut input_clone = input.to_vec();
+        // fft_dispatch_cpu(&mut input_clone, zero_factor, root_table);
+        // ark_std::println!("cpu done" );
+
+        let total_elements = input.len();
+        let mut io_u64 = input.iter().map(|x| x.to_u64()).collect::<Vec<u64>>();
+
+        let mut device_data: HostOrDeviceSlice<'_, u64> =
+            HostOrDeviceSlice::cuda_malloc(0, total_elements).unwrap();
+        device_data
+            .copy_from_host_offset(&io_u64, 0, total_elements)
+            .unwrap();
+        ntt_batch(
+            0,
+            device_data.as_mut_ptr() as *mut F,
+            input.len().trailing_zeros() as usize,
+            NTTConfig::default(),
+        );
+
+        // Copy results back from device to host
+        io_u64.resize(total_elements, 0u64);
+        device_data
+            .copy_to_host(&mut io_u64, total_elements)
+            .unwrap();
+
+        // Convert u64 results back to field elements
+        input.iter_mut().zip(io_u64.iter()).for_each(|(a, b)| {
+            *a = F::from_canonical_u64(*b);
+        });
+        // ark_std::println!("gpu done" );
+
+        // let mut to_print = false;
+        // for (i, (a, b)) in input.iter().zip(input_clone.iter()).enumerate() {
+        //     if a != b {
+        //         // panic!("Mismatch at index {}: gpu result = {}, cpu result = {}", i, a.to_u64(), b.to_u64());
+        //         to_print = true;
+        //         ark_std::println!(
+        //             "Mismatch at index {}: gpu result = {}, cpu result = {}",
+        //             i,
+        //             a.to_u64(),
+        //             b.to_u64()
+        //         );
+        //     }
+        // }
+
+        // if to_print {
+        //     ark_std::println!("Comparing results...");
+        //     ark_std::println!("cpu {:?}", input_clone);
+        //     ark_std::println!("gpu {:?}", input);
+        // }
+
+        return;
+    } else {
+        return fft_dispatch_cpu(input, zero_factor, root_table);
+    }
+}
+
+fn fft_dispatch_cpu<F: Field>(
+    input: &mut [F],
+    zero_factor: Option<usize>,
+    root_table: Option<&FftRootTable<F>>,
+) {
+    if root_table.is_some() {
+        return fft_classic(input, zero_factor.unwrap_or(0), root_table.unwrap());
+    } else {
+        // let pre_computed = F::pre_compute_fft_root_table(input.len());
+        // if pre_computed.is_some() {
+        //     return fft_classic(input, zero_factor.unwrap_or(0), pre_computed.unwrap());
+        // } else {
+        //     let computed = fft_root_table::<F>(input.len());
+
+        //     return fft_classic(input, zero_factor.unwrap_or(0), computed.as_ref());
+        // }
+        let computed = fft_root_table::<F>(input.len());
+
+        return fft_classic(input, zero_factor.unwrap_or(0), computed.as_ref());
+    };
+}
+
 #[inline]
 fn fft_dispatch<F: Field>(
     input: &mut [F],
     zero_factor: Option<usize>,
     root_table: Option<&FftRootTable<F>>,
 ) {
-    let computed_root_table = root_table.is_none().then(|| fft_root_table(input.len()));
-    let used_root_table = root_table.or(computed_root_table.as_ref()).unwrap();
-
-    fft_classic(input, zero_factor.unwrap_or(0), used_root_table);
+    #[cfg(feature = "cuda")]
+    {
+        return fft_dispatch_gpu(input, zero_factor, root_table);
+    }
+    #[cfg(not(feature = "cuda"))]
+    {
+        return fft_dispatch_cpu(input, zero_factor, root_table);
+    }
 }
 
 #[inline]
@@ -50,6 +145,7 @@ pub fn fft<F: Field>(poly: PolynomialCoeffs<F>) -> PolynomialValues<F> {
 }
 
 #[inline]
+
 pub fn fft_with_options<F: Field>(
     poly: PolynomialCoeffs<F>,
     zero_factor: Option<usize>,
@@ -63,6 +159,28 @@ pub fn fft_with_options<F: Field>(
 #[inline]
 pub fn ifft<F: Field>(poly: PolynomialValues<F>) -> PolynomialCoeffs<F> {
     ifft_with_options(poly, None, None)
+}
+
+#[inline]
+pub fn ifft_cpu<F: Field>(poly: PolynomialValues<F>) -> PolynomialCoeffs<F> {
+    let n = poly.len();
+    let lg_n = log2_strict(n);
+    let n_inv = F::inverse_2exp(lg_n);
+
+    let PolynomialValues { values: mut buffer } = poly;
+    fft_dispatch_cpu(&mut buffer, None, None);
+
+    // We reverse all values except the first, and divide each by n.
+    buffer[0] *= n_inv;
+    buffer[n / 2] *= n_inv;
+    for i in 1..(n / 2) {
+        let j = n - i;
+        let coeffs_i = buffer[j] * n_inv;
+        let coeffs_j = buffer[i] * n_inv;
+        buffer[i] = coeffs_i;
+        buffer[j] = coeffs_j;
+    }
+    PolynomialCoeffs { coeffs: buffer }
 }
 
 pub fn ifft_with_options<F: Field>(
@@ -217,12 +335,20 @@ mod tests {
         type F = GoldilocksField;
         let degree = 200usize;
         let degree_padded = degree.next_power_of_two();
+        println!("Initializing CUDA");
+
+        #[cfg(feature = "cuda")]
+        for i in 8..=12 {
+            zeknox::init_twiddle_factors_rs(0, i);
+        }
+
+        println!("Testing fft/ifft with degree {}", degree);
 
         // Create a vector of coeffs; the first degree of them are
         // "random", the last degree_padded-degree of them are zero.
         let coeffs = (0..degree)
             .map(|i| F::from_canonical_usize(i * 1337 % 100))
-            .chain(core::iter::repeat_n(F::ZERO, degree_padded - degree))
+            .chain(core::iter::repeat(F::ZERO).take(degree_padded - degree))
             .collect::<Vec<_>>();
         assert_eq!(coeffs.len(), degree_padded);
         let coefficients = PolynomialCoeffs { coeffs };
@@ -238,6 +364,7 @@ mod tests {
             assert_eq!(interpolated_coefficients.coeffs[i], F::ZERO);
         }
 
+        println!("Testing ldes");
         for r in 0..4 {
             // expand coefficients by factor 2^r by filling with zeros
             let zero_tail = coefficients.lde(r);

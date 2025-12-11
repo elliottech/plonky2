@@ -59,6 +59,14 @@ impl<F: Extendable<2>> Sample for QuadraticExtension<F> {
 }
 
 impl<F: Extendable<2>> Field for QuadraticExtension<F> {
+    fn to_u64(&self) -> u64 {
+        unimplemented!()
+    }
+
+    fn from_u64(u: u64) -> Self {
+        unimplemented!()
+    }
+
     const ZERO: Self = Self([F::ZERO; 2]);
     const ONE: Self = Self([F::ONE, F::ZERO]);
     const TWO: Self = Self([F::TWO, F::ZERO]);
