@@ -12,7 +12,7 @@ use plonky2_util::log2_strict;
 use serde::{Deserialize, Serialize};
 
 use crate::extension::{Extendable, FieldExtension};
-use crate::fft::{FftRootTable, fft, fft_with_options, ifft, ifft_cpu};
+use crate::fft::{fft, fft_with_options, ifft, ifft_cpu, FftRootTable};
 use crate::types::Field;
 
 /// A polynomial in point-value form.

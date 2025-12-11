@@ -94,9 +94,6 @@ pub trait Field:
     /// Whether this field is supported by cuda
     const CUDA_SUPPORT: bool = false;
 
-    fn to_u64(&self) -> u64;
-    fn from_u64(u: u64) -> Self;
-
     fn order() -> BigUint;
     fn characteristic() -> BigUint;
 

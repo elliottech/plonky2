@@ -40,61 +40,32 @@ fn fft_dispatch_gpu<F: Field>(
     root_table: Option<&FftRootTable<F>>,
 ) {
     if F::CUDA_SUPPORT {
-        use zeknox::device::memory::HostOrDeviceSlice;
         use zeknox::ntt_batch;
         use zeknox::types::NTTConfig;
 
-        // let mut input_clone = input.to_vec();
-        // fft_dispatch_cpu(&mut input_clone, zero_factor, root_table);
-        // ark_std::println!("cpu done" );
+        #[cfg(feature = "cuda_sanity_check")]
+        let cpu_res = {
+            let mut input_clone = input.to_vec();
+            fft_dispatch_cpu(&mut input_clone, zero_factor, root_table);
+            input_clone
+        };
 
-        let total_elements = input.len();
-        let mut io_u64 = input.iter().map(|x| x.to_u64()).collect::<Vec<u64>>();
-
-        let mut device_data: HostOrDeviceSlice<'_, u64> =
-            HostOrDeviceSlice::cuda_malloc(0, total_elements).unwrap();
-        device_data
-            .copy_from_host_offset(&io_u64, 0, total_elements)
-            .unwrap();
         ntt_batch(
             0,
-            device_data.as_mut_ptr() as *mut F,
+            input,
             input.len().trailing_zeros() as usize,
             NTTConfig::default(),
         );
 
-        // Copy results back from device to host
-        io_u64.resize(total_elements, 0u64);
-        device_data
-            .copy_to_host(&mut io_u64, total_elements)
-            .unwrap();
-
-        // Convert u64 results back to field elements
-        input.iter_mut().zip(io_u64.iter()).for_each(|(a, b)| {
-            *a = F::from_canonical_u64(*b);
-        });
-        // ark_std::println!("gpu done" );
-
-        // let mut to_print = false;
-        // for (i, (a, b)) in input.iter().zip(input_clone.iter()).enumerate() {
-        //     if a != b {
-        //         // panic!("Mismatch at index {}: gpu result = {}, cpu result = {}", i, a.to_u64(), b.to_u64());
-        //         to_print = true;
-        //         ark_std::println!(
-        //             "Mismatch at index {}: gpu result = {}, cpu result = {}",
-        //             i,
-        //             a.to_u64(),
-        //             b.to_u64()
-        //         );
-        //     }
-        // }
-
-        // if to_print {
-        //     ark_std::println!("Comparing results...");
-        //     ark_std::println!("cpu {:?}", input_clone);
-        //     ark_std::println!("gpu {:?}", input);
-        // }
-
+        #[cfg(feature = "cuda_sanity_check")]
+        for (i, (a, b)) in input.iter().zip(cpu_res.iter()).enumerate() {
+            if a != b {
+                panic!(
+                    "Mismatch at index {}: gpu result = {}, cpu result = {}",
+                    i, a, b
+                );
+            }
+        }
         return;
     } else {
         return fft_dispatch_cpu(input, zero_factor, root_table);
@@ -109,16 +80,7 @@ fn fft_dispatch_cpu<F: Field>(
     if root_table.is_some() {
         return fft_classic(input, zero_factor.unwrap_or(0), root_table.unwrap());
     } else {
-        // let pre_computed = F::pre_compute_fft_root_table(input.len());
-        // if pre_computed.is_some() {
-        //     return fft_classic(input, zero_factor.unwrap_or(0), pre_computed.unwrap());
-        // } else {
-        //     let computed = fft_root_table::<F>(input.len());
-
-        //     return fft_classic(input, zero_factor.unwrap_or(0), computed.as_ref());
-        // }
         let computed = fft_root_table::<F>(input.len());
-
         return fft_classic(input, zero_factor.unwrap_or(0), computed.as_ref());
     };
 }

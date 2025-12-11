@@ -29,14 +29,14 @@ fn main() -> Result<()> {
     let initial_b = builder.add_virtual_target();
     let mut prev_target = initial_a;
     let mut cur_target = initial_b;
-    for _ in 0..9999999 {
+    for _ in 0..999999 {
         let temp = builder.add(prev_target, cur_target);
         prev_target = cur_target;
         cur_target = temp;
     }
     println!("Circuit built.");
 
-    let size = 19;
+    let size = 16;
 
     #[cfg(feature = "cuda")]
     {
@@ -54,19 +54,19 @@ fn main() -> Result<()> {
         // }
 
         zeknox::init_twiddle_factors_rs(0, size);
-        zeknox::init_twiddle_factors_rs(0, size+3);
+        zeknox::init_twiddle_factors_rs(0, size + 3);
         // Initialize coset on GPU
         // For Goldilocks field, the coset generator is 7 (MULTIPLICATIVE_GROUP_GENERATOR)
         // TODO: Make this generic for other fields if needed
         let coset_gen_u64 = 7u64;
-        zeknox::init_coset_rs(0, size+3, coset_gen_u64);
+        zeknox::init_coset_rs(0, size + 3, coset_gen_u64);
 
         // warm up GPU
         // for some reason the first 10 FFTs are somewhat buggy
 
         for i in 0..10 {
             let t = (0..1 << size)
-                .map(|x| GoldilocksField::from_u64(i * x as u64))
+                .map(|x| GoldilocksField::from_canonical_u64(i * x as u64))
                 .collect();
             let poly = PolynomialCoeffs::new(t);
             let _ = plonky2_field::fft::fft(poly.clone());

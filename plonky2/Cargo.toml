@@ -12,13 +12,16 @@ keywords.workspace = true
 categories.workspace = true
 
 [features]
-default = ["gate_testing", "parallel", "rand_chacha", "std", "timing"]
-# default = ["gate_testing", "parallel", "rand_chacha", "std", "cuda", "timing"]
+# default = ["gate_testing", "parallel", "rand_chacha", "std", "timing"]
+default = ["gate_testing", "parallel", "rand_chacha", "std", "cuda", "timing", "cuda_sanity_check"]
 gate_testing = []
 parallel = ["hashbrown/rayon", "plonky2_maybe_rayon/parallel"]
 std = ["anyhow/std", "rand/std", "itertools/use_std"]
 timing = ["std", "dep:web-time"]
 cuda = ["plonky2_field/cuda"]
+# sanity check: when this flag is on, the computation will done on both CPU and CUDA, and the results compared
+cuda_sanity_check = [ "cuda", "plonky2_field/cuda_sanity_check" ]
+
 
 [dependencies]
 ahash = { workspace = true }
