@@ -27,11 +27,6 @@ pub(crate) fn verify<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, c
         &verifier_data.circuit_digest,
         common_data,
     )?;
-    println!("verifier alphas: {:?}", challenges.plonk_alphas);
-    println!("verifier betas: {:?}", challenges.plonk_betas);
-    println!("verifier gammas: {:?}", challenges.plonk_gammas);
-    println!("verifier deltas: {:?}", challenges.plonk_deltas);
-    println!("verifier zeta: {:?}", challenges.plonk_zeta);
 
     verify_with_challenges::<F, C, D>(
         proof_with_pis.proof,
