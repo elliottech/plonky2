@@ -11,8 +11,13 @@ repository.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
+
 [features]
-default = ["gate_testing", "parallel", "rand_chacha", "std", "timing"]
+# default = ["gate_testing", "rand_chacha", "std", "timing", "cuda"]
+# default = ["gate_testing", "parallel", "rand_chacha", "std", "timing", ]
+
+default = ["gate_testing", "parallel", "rand_chacha", "std", "cuda", "timing", ]
+# default = ["gate_testing", "rand_chacha", "std", "cuda", "timing", "cuda_sanity_check"]
 # default = ["gate_testing", "parallel", "rand_chacha", "std", "cuda", "timing", "cuda_sanity_check"]
 gate_testing = []
 parallel = ["hashbrown/rayon", "plonky2_maybe_rayon/parallel"]
@@ -31,7 +36,7 @@ itertools = { workspace = true }
 keccak-hash = { version = "0.8.0", default-features = false }
 log = { workspace = true }
 num = { workspace = true }
-once_cell = { workspace = true }
+once_cell = { workspace = true, features = ["std"] }
 rand = { workspace = true }
 rand_chacha = { version = "0.3.1", optional = true, default-features = false }
 serde = { workspace = true, features = ["rc"] }

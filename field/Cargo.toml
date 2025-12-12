@@ -35,7 +35,8 @@ workspace = true
 
 
 [features]
-default = []
+# default = []
+default = [ "cuda" ]
 # default = [ "cuda", "cuda_sanity_check" ]
 cuda = []
 # sanity check: when this flag is on, the computation will done on both CPU and CUDA, and the results compared

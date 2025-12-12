@@ -17,7 +17,7 @@ echo "========================================="
 echo ""
 
 # Step 1: Check NVIDIA driver and CUDA
-echo -e "${YELLOW}[1/5] Checking NVIDIA driver and CUDA...${NC}"
+echo -e "${YELLOW}[1/7] Checking NVIDIA driver and CUDA...${NC}"
 if ! command -v nvidia-smi &> /dev/null; then
     echo -e "${RED}ERROR: nvidia-smi not found. Please install NVIDIA drivers.${NC}"
     exit 1
@@ -45,7 +45,7 @@ echo -e "${GREEN} NVIDIA driver check passed${NC}"
 echo ""
 
 # Step 2: Check zeknox library
-echo -e "${YELLOW}[2/5] Checking zeknox library...${NC}"
+echo -e "${YELLOW}[2/7] Checking zeknox library...${NC}"
 ZEKNOX_PATH="../zeknox"
 if [ ! -d "$ZEKNOX_PATH" ]; then
     echo -e "${RED}ERROR: zeknox library not found at $ZEKNOX_PATH${NC}"
@@ -64,7 +64,7 @@ echo -e "${GREEN} zeknox library check passed${NC}"
 echo ""
 
 # Step 3: Run field tests
-echo -e "${YELLOW}[3/5] Running field tests with GPU acceleration...${NC}"
+echo -e "${YELLOW}[3/7] Running field tests with GPU acceleration...${NC}"
 echo "Command: cd field && cargo test --release --features=cuda -- --test-threads=1"
 echo ""
 
@@ -82,7 +82,7 @@ cd ..
 echo ""
 
 # Step 4: Run fibonacci example with CUDA for correctness
-echo -e "${YELLOW}[4/5] Running fibonacci example with CUDA features...${NC}"
+echo -e "${YELLOW}[4/7] Running fibonacci example with CUDA features...${NC}"
 echo "Command: NUM_OF_GPUS=1 cargo run --release --features=cuda_sanity_check --example fibonacci"
 echo ""
 
@@ -97,7 +97,7 @@ fi
 echo ""
 
 # Step 5: Run fibonacci example with CUDA for speed
-echo -e "${YELLOW}[4/5] Running fibonacci example with CUDA features...${NC}"
+echo -e "${YELLOW}[5/7] Running fibonacci example with CUDA features...${NC}"
 echo "Command: NUM_OF_GPUS=1 cargo run --release --example fibonacci --features=cuda"
 echo ""
 
@@ -113,7 +113,7 @@ echo ""
 
 
 # Step 6: Run fibonacci example with CPU
-echo -e "${YELLOW}[4/5] Running fibonacci example with CUDA features...${NC}"
+echo -e "${YELLOW}[6/7] Running fibonacci example with CUDA features...${NC}"
 echo "Command: NUM_OF_GPUS=1 cargo run --release --example fibonacci"
 echo ""
 
