@@ -679,7 +679,7 @@ pub fn check_lookup_constraints_batch<F: RichField + Extendable<D>, const D: usi
 
         // Check LDC row and col transitions. It's the same constraint, with a row transition happening for slot == 0.
         let unfiltered_ldc_transition =
-            lu_sum_prods.multiply_accumulate(lu_prod, (z_x_lookup_sldcs[poly] - prev));
+            lu_sum_prods.multiply_accumulate(lu_prod, z_x_lookup_sldcs[poly] - prev);
         constraints
             .push(lookup_selectors[LookupSelectors::TransLdc as usize] * unfiltered_ldc_transition);
     }

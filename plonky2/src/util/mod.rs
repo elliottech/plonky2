@@ -5,8 +5,6 @@ use alloc::vec::Vec;
 
 #[doc(inline)]
 pub use plonky2_util::*;
-#[cfg(feature = "cuda")]
-use zeknox::{device::memory::HostOrDeviceSlice, transpose_rev_batch, types::TransposeConfig};
 
 use crate::field::polynomial::PolynomialValues;
 use crate::field::types::Field;
@@ -23,81 +21,6 @@ pub(crate) fn transpose_poly_values<F: Field>(polys: Vec<PolynomialValues<F>>) -
     transpose(&poly_values)
 }
 
-#[cfg(feature = "cuda")]
-fn transpose_gpu<T: Send + Sync + Copy>(matrix: &[Vec<T>]) -> Vec<Vec<T>> {
-    use std::time::Instant;
-
-    if matrix.is_empty() || matrix[0].is_empty() {
-        return vec![];
-    }
-
-    let num_rows = matrix.len();
-    let num_cols = matrix[0].len();
-    let total_elements = num_rows * num_cols;
-
-    // Flatten the 2D matrix into a 1D vector for GPU
-    let mut flat_input: Vec<T> = Vec::with_capacity(total_elements);
-    for row in matrix {
-        flat_input.extend_from_slice(row);
-    }
-
-    let gpu_id = 0;
-    let log_n = (num_cols as f64).log2().ceil() as usize;
-
-    // Allocate GPU memory for input and output
-    let mut gpu_input: HostOrDeviceSlice<'_, T> =
-        HostOrDeviceSlice::cuda_malloc(gpu_id, total_elements).unwrap();
-    let mut gpu_output: HostOrDeviceSlice<'_, T> =
-        HostOrDeviceSlice::cuda_malloc(gpu_id, total_elements).unwrap();
-
-    // Copy input to GPU
-    gpu_input.copy_from_host(&flat_input).unwrap();
-
-    // Configure transpose
-    let mut cfg = TransposeConfig::default();
-    cfg.batches = num_rows as u32;
-    cfg.are_inputs_on_device = true;
-    cfg.are_outputs_on_device = true;
-
-    let timers = Instant::now();
-    // Perform GPU transpose
-    transpose_rev_batch(
-        gpu_id,
-        gpu_output.as_mut_ptr(),
-        gpu_input.as_mut_ptr(),
-        log_n,
-        cfg,
-    );
-    println!(
-        "CUDA transpose of {}x{} took {:?}",
-        num_rows,
-        num_cols,
-        timers.elapsed()
-    );
-
-    let timer = Instant::now();
-    // Copy result back to host
-    let mut flat_output = vec![unsafe { std::mem::zeroed() }; total_elements];
-    gpu_output
-        .copy_to_host(&mut flat_output, total_elements)
-        .unwrap();
-    println!(
-        "CUDA transpose copy back and reshape of {}x{} took {:?}",
-        num_rows,
-        num_cols,
-        timer.elapsed()
-    );
-
-    // Reshape back to 2D (transposed) using chunks_exact for better performance
-    // The GPU transpose outputs in column-major order, so we can just chunk by num_rows
-    let result: Vec<Vec<T>> = flat_output
-        .chunks_exact(num_rows)
-        .map(|chunk| chunk.to_vec())
-        .collect();
-
-    result
-}
-
 pub fn transpose<T: Send + Sync + Copy>(matrix: &[Vec<T>]) -> Vec<Vec<T>> {
     if matrix.is_empty() {
         return vec![];
@@ -105,31 +28,6 @@ pub fn transpose<T: Send + Sync + Copy>(matrix: &[Vec<T>]) -> Vec<Vec<T>> {
 
     let len = matrix[0].len();
 
-    // #[cfg(feature = "cuda")]
-    // {
-    //     // Use GPU for large matrices
-    //     // Threshold: use GPU if total elements >= 2^16 (65536) or if CUDA_TRANSPOSE_THRESHOLD is set
-    //     let num_rows = matrix.len();
-    //     let num_cols = len;
-    //     let total_elements = num_rows * num_cols;
-
-    //     let use_gpu = if let Ok(threshold_str) = std::env::var("CUDA_TRANSPOSE_THRESHOLD") {
-    //         if let Ok(threshold) = threshold_str.parse::<usize>() {
-    //             total_elements >= threshold
-    //         } else {
-    //             total_elements >= 65536
-    //         }
-    //     } else {
-    //         total_elements >= 65536
-    //     };
-
-    //     if use_gpu && num_cols.is_power_of_two() {
-    //         return transpose_gpu(matrix);
-    //     }
-    // }
-
-    // CPU fallback
-    // Use sequential iteration for deterministic results
     (0..len)
         .map(|i| matrix.iter().map(|row| row[i]).collect())
         .collect()
