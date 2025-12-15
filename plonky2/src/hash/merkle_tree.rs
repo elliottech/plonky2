@@ -276,7 +276,7 @@ fn fill_digests_buf_gpu<F: RichField, H: Hasher<F>>(
     let leaves_count = leaves.len() / leaf_size;
 
     let num_gpus: usize = std::env::var("NUM_OF_GPUS")
-        .expect("NUM_OF_GPUS should be set")
+        .unwrap_or("1".to_string())
         .parse()
         .unwrap();
 
@@ -286,7 +286,7 @@ fn fill_digests_buf_gpu<F: RichField, H: Hasher<F>>(
     if *gpu_id_lock >= num_gpus as u64 {
         *gpu_id_lock = 0;
     }
-    println!("Using GPU id {} leave length {}", gpu_id, leaves.len());
+    log::debug!("Using GPU id {} leave length {}", gpu_id, leaves.len());
 
     let now = Instant::now();
     let gpu_leaves_buf_result = HostOrDeviceSlice::cuda_malloc(gpu_id as i32, leaves.len());
@@ -351,7 +351,7 @@ fn fill_digests_buf_gpu_ptr<F: RichField, H: Hasher<F>>(
 
     unsafe {
         let num_gpus: usize = std::env::var("NUM_OF_GPUS")
-            .expect("NUM_OF_GPUS should be set")
+            .unwrap_or("1".to_string())
             .parse()
             .unwrap();
         if !FORCE_SINGLE_GPU

@@ -3,6 +3,7 @@
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 
+use plonky2_maybe_rayon::{MaybeIntoParIter, ParallelIterator};
 #[doc(inline)]
 pub use plonky2_util::*;
 
@@ -29,6 +30,7 @@ pub fn transpose<T: Send + Sync + Copy>(matrix: &[Vec<T>]) -> Vec<Vec<T>> {
     let len = matrix[0].len();
 
     (0..len)
+        .into_par_iter()
         .map(|i| matrix.iter().map(|row| row[i]).collect())
         .collect()
 }

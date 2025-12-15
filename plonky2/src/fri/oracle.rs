@@ -54,8 +54,6 @@ impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>
     PolynomialBatch<F, C, D>
 {
     /// Creates a list polynomial commitment for the polynomials interpolating the values in `values`.
-    /// This function is called by the builder during preprocessing the circuit.
-    /// This function always calls IFFT on CPU to avoid strange GPU issue.
     pub fn from_values(
         values: Vec<PolynomialValues<F>>,
         rate_bits: usize,
@@ -64,6 +62,7 @@ impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>
         timing: &mut TimingTree,
         fft_root_table: Option<&FftRootTable<F>>,
     ) -> Self {
+        // The first IFFT is always done on CPU to avoid strange GPU issue.
         let coeffs = timed!(
             timing,
             "CPU IFFT",
@@ -73,25 +72,14 @@ impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>
                 .collect::<Vec<_>>()
         );
 
-        if cfg!(feature = "cuda") {
-            Self::from_coeffs_gpu(
-                coeffs,
-                rate_bits,
-                blinding,
-                cap_height,
-                timing,
-                fft_root_table,
-            )
-        } else {
-            Self::from_coeffs_cpu(
-                coeffs,
-                rate_bits,
-                blinding,
-                cap_height,
-                timing,
-                fft_root_table,
-            )
-        }
+        Self::from_coeffs(
+            coeffs,
+            rate_bits,
+            blinding,
+            cap_height,
+            timing,
+            fft_root_table,
+        )
     }
 
     /// Creates a list polynomial commitment for the polynomials `polynomials`.
@@ -157,79 +145,40 @@ impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>
         }
     }
 
+    #[cfg(feature = "cuda")]
     fn from_coeffs_gpu(
         polynomials: Vec<PolynomialCoeffs<F>>,
         rate_bits: usize,
         blinding: bool,
         cap_height: usize,
         timing: &mut TimingTree,
-        fft_root_table: Option<&FftRootTable<F>>,
+        _fft_root_table: Option<&FftRootTable<F>>,
     ) -> Self {
+        assert!(F::CUDA_SUPPORT, "CUDA is not support for this field");
+
         let degree = polynomials[0].len();
 
         // If blinding, salt with two random elements to each leaf vector.
         let salt_size = if blinding { SALT_SIZE } else { 0 };
-        println!(
-            "lde_values: num_polys={}, degree={}, blinding={}, salt_size={}",
-            polynomials.len(),
-            degree,
-            blinding,
-            salt_size
-        );
 
-        if F::CUDA_SUPPORT {
-            return Self::from_coeffs_gpu_optimized(
-                polynomials,
-                rate_bits,
-                blinding,
-                cap_height,
-                timing,
-                fft_root_table,
-                degree,
-                salt_size,
-            );
-        }
-
-        // Fallback to CPU path
-        let lde_values = polynomials
-            .iter()
-            .map(|p| {
-                assert_eq!(p.len(), degree, "Polynomial degrees inconsistent");
-                p.lde(rate_bits)
-                    .coset_fft_with_options(F::coset_shift(), Some(rate_bits), fft_root_table)
-                    .values
-            })
-            .chain(
-                (0..salt_size)
-                    .into_iter()
-                    .map(|_| F::rand_vec(degree << rate_bits)),
-            )
-            .collect::<Vec<_>>();
-        let mut leaves = timed!(timing, "transpose LDEs", transpose(&lde_values));
-        reverse_index_bits_in_place(&mut leaves);
-        let merkle_tree = timed!(
-            timing,
-            "build Merkle tree",
-            MerkleTree::new_from_2d(leaves, cap_height)
-        );
-
-        Self {
+        Self::from_coeffs_gpu_helper(
             polynomials,
-            merkle_tree,
-            degree_log: log2_strict(degree),
             rate_bits,
             blinding,
-        }
+            cap_height,
+            timing,
+            degree,
+            salt_size,
+        )
     }
 
     #[cfg(feature = "cuda")]
-    fn from_coeffs_gpu_optimized(
+    fn from_coeffs_gpu_helper(
         polynomials: Vec<PolynomialCoeffs<F>>,
         rate_bits: usize,
         blinding: bool,
         cap_height: usize,
         timing: &mut TimingTree,
-        _fft_root_table: Option<&FftRootTable<F>>,
         degree: usize,
         salt_size: usize,
     ) -> Self {
@@ -248,9 +197,11 @@ impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>
         // Step 1: Compute coset FFT on GPU, keeping data on GPU
         let gpu_lde_values = timed!(timing, "GPU coset FFT", {
             // Allocate GPU memory for all polynomials
-            println!(
+            log::debug!(
                 "Allocating GPU memory for {} polynomials of size {} (total {} elements)",
-                num_polys, lde_size, total_alloc_size
+                num_polys,
+                lde_size,
+                total_alloc_size
             );
 
             let mut gpu_buffer = timed!(
@@ -366,16 +317,9 @@ impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>
 
         // If blinding, salt with two random elements to each leaf vector.
         let salt_size = if blinding { SALT_SIZE } else { 0 };
-        println!(
-            "lde_values: num_polys={}, degree={}, blinding={}, salt_size={}",
-            polynomials.len(),
-            degree,
-            blinding,
-            salt_size
-        );
 
         polynomials
-            .iter()
+            .par_iter()
             .map(|p| {
                 assert_eq!(p.len(), degree, "Polynomial degrees inconsistent");
                 p.lde(rate_bits)
@@ -384,7 +328,7 @@ impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>
             })
             .chain(
                 (0..salt_size)
-                    .into_iter()
+                    .into_par_iter()
                     .map(|_| F::rand_vec(degree << rate_bits)),
             )
             .collect()

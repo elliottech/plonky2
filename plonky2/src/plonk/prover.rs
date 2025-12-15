@@ -165,17 +165,10 @@ where
         // Use sequential iteration for deterministic results
         witness
             .wire_values
-            .iter()
+            .par_iter()
             .map(|column| PolynomialValues::new(column.clone()))
             .collect()
     );
-    // Debug: Print first few wire values to check determinism
-    if !wires_values.is_empty() && !wires_values[0].values.is_empty() {
-        println!(
-            "First wire poly first 5 values: {:?}",
-            &wires_values[0].values[..5.min(wires_values[0].values.len())]
-        );
-    }
     let wires_commitment = timed!(
         timing,
         "compute wires commitment",
@@ -320,7 +313,6 @@ where
         "Opening point is in the subgroup."
     );
 
-    println!("Constructing the opening set, including lookups.");
     let openings = timed!(
         timing,
         "construct the opening set, including lookups",
@@ -334,7 +326,6 @@ where
             common_data
         )
     );
-    println!("Computed openings.");
 
     challenger.observe_openings(&openings.to_fri_openings());
     let instance = common_data.get_fri_instance(zeta);
@@ -357,7 +348,7 @@ where
             timing,
         )
     );
-    println!("Computed opening proofs.");
+
     let proof = Proof::<F, C, D> {
         wires_cap: wires_commitment.merkle_tree.cap,
         plonk_zs_partial_products_cap: partial_products_zs_and_lookup_commitment.merkle_tree.cap,
