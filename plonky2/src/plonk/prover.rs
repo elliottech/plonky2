@@ -4,6 +4,7 @@
 use alloc::{format, vec, vec::Vec};
 use core::cmp::min;
 use core::mem::swap;
+use std::time::Instant;
 
 use anyhow::{ensure, Result};
 use hashbrown::HashMap;
@@ -649,11 +650,15 @@ fn compute_quotient_polys<
     // steps away since we work on an LDE of degree `max_filtered_constraint_degree`.
     let next_step = 1 << quotient_degree_bits;
 
+    let timer = Instant::now();
     let points = F::two_adic_subgroup(common_data.degree_bits() + quotient_degree_bits);
+    println!("Time to compute LDE points: {:?}", timer.elapsed());
+
     let lde_size = points.len();
 
     let z_h_on_coset = ZeroPolyOnCoset::new(common_data.degree_bits(), quotient_degree_bits);
 
+    let timer = Instant::now();
     // Precompute the lookup table evals on the challenges in delta
     // These values are used to produce the final RE constraints for each lut,
     // and are the same each time in check_lookup_constraints_batched.
@@ -686,14 +691,19 @@ fn compute_quotient_polys<
     } else {
         vec![]
     };
+    println!(
+        "Time to compute LUT RE polynomial evals: {:?}",
+        timer.elapsed()
+    );
 
+    let timer = Instant::now();
     let lut_re_poly_evals_refs: Vec<&[F]> =
         lut_re_poly_evals.iter().map(|v| v.as_slice()).collect();
 
-    let points_batches = points.par_chunks(BATCH_SIZE);
     let num_batches = points.len().div_ceil(BATCH_SIZE);
 
-    let quotient_values: Vec<Vec<F>> = points_batches
+    let quotient_values: Vec<Vec<F>> = points
+        .par_chunks(BATCH_SIZE)
         .enumerate()
         .flat_map(|(batch_i, xs_batch)| {
             // Each batch must be the same size, except the last one, which may be smaller.
@@ -702,23 +712,26 @@ fn compute_quotient_polys<
                     || (batch_i == num_batches - 1 && xs_batch.len() <= BATCH_SIZE)
             );
 
-            let indices_batch: Vec<usize> =
-                (BATCH_SIZE * batch_i..BATCH_SIZE * batch_i + xs_batch.len()).collect();
+            let batch_size = xs_batch.len();
+            let batch_start = BATCH_SIZE * batch_i;
 
-            let mut shifted_xs_batch = Vec::with_capacity(xs_batch.len());
-            let mut local_zs_batch = Vec::with_capacity(xs_batch.len());
-            let mut next_zs_batch = Vec::with_capacity(xs_batch.len());
+            let mut shifted_xs_batch = Vec::with_capacity(batch_size);
+            let mut local_zs_batch = Vec::with_capacity(batch_size);
+            let mut next_zs_batch = Vec::with_capacity(batch_size);
 
-            let mut local_lookup_batch = Vec::with_capacity(xs_batch.len());
-            let mut next_lookup_batch = Vec::with_capacity(xs_batch.len());
+            let mut local_lookup_batch = Vec::with_capacity(batch_size);
+            let mut next_lookup_batch = Vec::with_capacity(batch_size);
 
-            let mut partial_products_batch = Vec::with_capacity(xs_batch.len());
-            let mut s_sigmas_batch = Vec::with_capacity(xs_batch.len());
+            let mut partial_products_batch = Vec::with_capacity(batch_size);
+            let mut s_sigmas_batch = Vec::with_capacity(batch_size);
 
-            let mut local_constants_batch_refs = Vec::with_capacity(xs_batch.len());
-            let mut local_wires_batch_refs = Vec::with_capacity(xs_batch.len());
+            let mut local_constants_batch_refs = Vec::with_capacity(batch_size);
+            let mut local_wires_batch_refs = Vec::with_capacity(batch_size);
 
-            for (&i, &x) in indices_batch.iter().zip(xs_batch) {
+            // let timer1 = Instant::now();
+
+            for (j, &x) in xs_batch.iter().enumerate() {
+                let i = batch_start + j;
                 let shifted_x = F::coset_shift() * x;
                 let i_next = (i + next_step) % lde_size;
                 let local_constants_sigmas = prover_data
@@ -762,20 +775,28 @@ fn compute_quotient_polys<
                 s_sigmas_batch.push(s_sigmas);
             }
 
-            // NB (JN): I'm not sure how (in)efficient the below is. It needs measuring.
-            let mut local_constants_batch =
-                vec![F::ZERO; xs_batch.len() * local_constants_batch_refs[0].len()];
-            for i in 0..local_constants_batch_refs[0].len() {
+            // println!(
+            //     "Time to gather LDE values for batch {}: {:?}",
+            //     batch_i,
+            //     timer1.elapsed()
+            // );
+
+            // Optimized transposition with better cache locality
+            let n_constants = local_constants_batch_refs[0].len();
+            let mut local_constants_batch = vec![F::ZERO; xs_batch.len() * n_constants];
+            for i in 0..n_constants {
+                let offset = i * xs_batch.len();
                 for (j, constants) in local_constants_batch_refs.iter().enumerate() {
-                    local_constants_batch[i * xs_batch.len() + j] = constants[i];
+                    local_constants_batch[offset + j] = constants[i];
                 }
             }
 
-            let mut local_wires_batch =
-                vec![F::ZERO; xs_batch.len() * local_wires_batch_refs[0].len()];
-            for i in 0..local_wires_batch_refs[0].len() {
+            let n_wires = local_wires_batch_refs[0].len();
+            let mut local_wires_batch = vec![F::ZERO; xs_batch.len() * n_wires];
+            for i in 0..n_wires {
+                let offset = i * xs_batch.len();
                 for (j, wires) in local_wires_batch_refs.iter().enumerate() {
-                    local_wires_batch[i * xs_batch.len() + j] = wires[i];
+                    local_wires_batch[offset + j] = wires[i];
                 }
             }
 
@@ -786,6 +807,8 @@ fn compute_quotient_polys<
                 public_inputs_hash,
             );
 
+            // let timer1 = Instant::now();
+            let indices_batch: Vec<usize> = (batch_start..batch_start + batch_size).collect();
             let mut quotient_values_batch = eval_vanishing_poly_base_batch::<F, D>(
                 common_data,
                 &indices_batch,
@@ -804,21 +827,42 @@ fn compute_quotient_polys<
                 &z_h_on_coset,
                 &lut_re_poly_evals_refs,
             );
+            // println!(
+            //     "Time to eval vanishing poly for batch {}: {:?}",
+            //     batch_i,
+            //     timer1.elapsed()
+            // );
 
-            for (&i, quotient_values) in indices_batch.iter().zip(quotient_values_batch.iter_mut())
-            {
+            // let timer1 = Instant::now();
+            for (j, quotient_values) in quotient_values_batch.iter_mut().enumerate() {
+                let i = batch_start + j;
                 let denominator_inv = z_h_on_coset.eval_inverse(i);
                 quotient_values
                     .iter_mut()
                     .for_each(|v| *v *= denominator_inv);
             }
+            // println!(
+            //     "Time to divide out Z_H for batch {}: {:?}",
+            //     batch_i,
+            //     timer1.elapsed()
+            // );
+
             quotient_values_batch
         })
         .collect();
 
-    transpose(&quotient_values)
+    println!(
+        "Time to compute quotient polys: {:?} for {} points",
+        timer.elapsed(),
+        quotient_values.len()
+    );
+
+    let timer = Instant::now();
+    let res = transpose(&quotient_values)
         .into_par_iter()
         .map(PolynomialValues::new)
         .map(|values| values.coset_ifft(F::coset_shift()))
-        .collect()
+        .collect();
+    println!("Time to compute quotient polys IFFT: {:?}", timer.elapsed());
+    res
 }

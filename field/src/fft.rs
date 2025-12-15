@@ -11,6 +11,40 @@ use crate::types::Field;
 
 pub type FftRootTable<F> = Vec<Vec<F>>;
 
+pub fn batch_fft<F: Field>(input: &[PolynomialCoeffs<F>]) -> Vec<PolynomialValues<F>> {
+    #[cfg(feature = "cuda")]
+    {
+        use zeknox::ntt_batch;
+        use zeknox::types::NTTConfig;
+
+        let mut data = input
+            .iter()
+            .flat_map(|poly| poly.coeffs.clone())
+            .collect::<Vec<F>>();
+        let mut cfg = NTTConfig::default();
+        cfg.batches = input.len() as u32;
+        let poly_len = input[0].len();
+        ntt_batch(0, &mut data, log2_strict(poly_len), cfg);
+
+        data.chunks(poly_len)
+            .map(|chunk| PolynomialValues::new(chunk.to_vec()))
+            .collect()
+    }
+    #[cfg(not(feature = "cuda"))]
+    {
+        let mut res = Vec::with_capacity(input.len());
+        for poly in input.iter() {
+            let mut batch_res = Vec::with_capacity(poly.len());
+            for p in poly {
+                let pv = fft_with_options(p.clone(), None, None);
+                batch_res.push(pv);
+            }
+            res.extend(batch_res);
+        }
+        res
+    }
+}
+
 pub fn fft_root_table<F: Field>(n: usize) -> FftRootTable<F> {
     let lg_n = log2_strict(n);
     // bases[i] = g^2^i, for i = 0, ..., lg_n - 1

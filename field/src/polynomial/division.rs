@@ -78,7 +78,7 @@ impl<F: Field> PolynomialCoeffs<F> {
             .iter()
             .rev()
             .scan(F::ZERO, |acc, &c| {
-                *acc = *acc * z + c;
+                *acc = c.multiply_accumulate(*acc, z);
                 Some(*acc)
             })
             .collect::<Vec<_>>();
