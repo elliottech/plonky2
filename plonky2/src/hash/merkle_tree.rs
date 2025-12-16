@@ -576,6 +576,8 @@ impl<F: RichField, H: Hasher<F>> MerkleTree<F, H> {
         leaf_len: usize,
         cap_height: usize,
     ) -> Self {
+        use plonky2_field::util::vec_zeroed;
+
         let log2_leaves_len = log2_strict(leaves_len);
         assert!(
             cap_height <= log2_leaves_len,
@@ -585,7 +587,7 @@ impl<F: RichField, H: Hasher<F>> MerkleTree<F, H> {
         );
 
         // copy data from GPU in async mode
-        let mut host_leaves: Vec<F> = vec![F::ZERO; leaves_len * leaf_len];
+        let mut host_leaves: Vec<F> = unsafe { vec_zeroed(leaves_len * leaf_len) };
         let stream_copy = CudaStream::create().unwrap();
 
         let start = std::time::Instant::now();

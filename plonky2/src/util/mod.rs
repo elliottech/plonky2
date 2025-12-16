@@ -11,7 +11,6 @@ use crate::field::polynomial::PolynomialValues;
 use crate::field::types::Field;
 
 pub(crate) mod context_tree;
-pub(crate) mod mem;
 pub(crate) mod partial_products;
 pub mod reducing;
 pub mod serialization;

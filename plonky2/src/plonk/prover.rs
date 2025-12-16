@@ -7,6 +7,7 @@ use core::mem::swap;
 
 use anyhow::{ensure, Result};
 use hashbrown::HashMap;
+use plonky2_field::util::vec_zeroed;
 use plonky2_maybe_rayon::*;
 
 use super::circuit_builder::{LookupChallenges, LookupWire};

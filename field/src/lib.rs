@@ -24,6 +24,7 @@ pub mod polynomial;
 pub mod secp256k1_base;
 pub mod secp256k1_scalar;
 pub mod types;
+pub mod util;
 pub mod zero_poly_coset;
 
 #[cfg(test)]

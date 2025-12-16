@@ -181,11 +181,10 @@ impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>
         degree: usize,
         salt_size: usize,
     ) -> Self {
+        use plonky2_field::util::vec_zeroed;
         use zeknox::device::memory::HostOrDeviceSlice;
         use zeknox::types::{NTTConfig, TransposeConfig};
         use zeknox::{ntt_batch_ptr, transpose_rev_batch};
-
-        use crate::util::mem::vec_zeroed;
 
         let lde_size = degree << rate_bits;
         let num_polys = polynomials.len() + salt_size;
@@ -213,11 +212,9 @@ impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>
             );
 
             // Copy all data to GPU in one go
-            let mut flat_data = timed!(
-                timing,
-                "Prepare CPU memory",
-                unsafe { vec_zeroed::<F>(total_alloc_size) }
-            );
+            let mut flat_data = timed!(timing, "Prepare CPU memory", unsafe {
+                vec_zeroed::<F>(total_alloc_size)
+            });
 
             timed!(timing, "Copy CPU memory", {
                 for i in 0..polynomials.len() {
