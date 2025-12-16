@@ -14,9 +14,9 @@ categories.workspace = true
 
 [features]
 # default = ["gate_testing", "rand_chacha", "std", "timing", "cuda"]
-# default = ["gate_testing", "parallel", "rand_chacha", "std", "timing", ]
+default = ["gate_testing", "parallel", "rand_chacha", "std", "timing", ]
 
-default = ["gate_testing", "parallel", "rand_chacha", "std", "cuda", "timing", ]
+# default = ["gate_testing", "parallel", "rand_chacha", "std", "cuda", "timing", ]
 # default = ["gate_testing", "rand_chacha", "std", "cuda", "timing", "cuda_sanity_check"]
 # default = ["gate_testing", "parallel", "rand_chacha", "std", "cuda", "timing", "cuda_sanity_check"]
 gate_testing = []

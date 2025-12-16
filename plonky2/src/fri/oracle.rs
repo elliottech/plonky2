@@ -91,25 +91,24 @@ impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>
         timing: &mut TimingTree,
         fft_root_table: Option<&FftRootTable<F>>,
     ) -> Self {
-        if cfg!(feature = "cuda") {
-            Self::from_coeffs_gpu(
-                polynomials,
-                rate_bits,
-                blinding,
-                cap_height,
-                timing,
-                fft_root_table,
-            )
-        } else {
-            Self::from_coeffs_cpu(
-                polynomials,
-                rate_bits,
-                blinding,
-                cap_height,
-                timing,
-                fft_root_table,
-            )
-        }
+        #[cfg(feature = "cuda")]
+        return Self::from_coeffs_gpu(
+            polynomials,
+            rate_bits,
+            blinding,
+            cap_height,
+            timing,
+            fft_root_table,
+        );
+        #[cfg(not(feature = "cuda"))]
+        Self::from_coeffs_cpu(
+            polynomials,
+            rate_bits,
+            blinding,
+            cap_height,
+            timing,
+            fft_root_table,
+        )
     }
 
     /// Creates a list polynomial commitment for the polynomials `polynomials`.

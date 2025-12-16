@@ -34,12 +34,8 @@ pub fn batch_fft<F: Field>(input: &[PolynomialCoeffs<F>]) -> Vec<PolynomialValue
     {
         let mut res = Vec::with_capacity(input.len());
         for poly in input.iter() {
-            let mut batch_res = Vec::with_capacity(poly.len());
-            for p in poly {
-                let pv = fft_with_options(p.clone(), None, None);
-                batch_res.push(pv);
-            }
-            res.extend(batch_res);
+            let pv = fft_with_options(poly.clone(), None, None);
+            res.push(pv);
         }
         res
     }
