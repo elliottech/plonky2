@@ -4,8 +4,8 @@ use core::marker::PhantomData;
 
 use anyhow::Result;
 
-use super::config::*;
-use super::hash::Poseidon2;
+use crate::hash::poseidon2::config::*;
+use crate::hash::poseidon2::hash::Poseidon2;
 use crate::field::extension::Extendable;
 use crate::field::types::Field;
 use crate::gates::gate::Gate;

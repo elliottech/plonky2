@@ -3,7 +3,7 @@ use core::fmt::Debug;
 use plonky2_field::ops::Square;
 
 use super::config::*;
-use super::gate::Poseidon2Gate;
+use crate::gates::poseidon2::Poseidon2Gate;
 use crate::field::extension::{Extendable, FieldExtension};
 use crate::field::goldilocks_field::GoldilocksField as F;
 use crate::field::types::{Field, PrimeField64};
