@@ -4,13 +4,13 @@ use core::marker::PhantomData;
 
 use anyhow::Result;
 
-use crate::hash::poseidon2::config::*;
-use crate::hash::poseidon2::hash::Poseidon2;
 use crate::field::extension::Extendable;
 use crate::field::types::Field;
 use crate::gates::gate::Gate;
 use crate::gates::util::StridedConstraintConsumer;
 use crate::hash::hash_types::RichField;
+use crate::hash::poseidon2::config::*;
+use crate::hash::poseidon2::hash::Poseidon2;
 use crate::iop::ext_target::ExtensionTarget;
 use crate::iop::generator::{GeneratedValues, SimpleGenerator, WitnessGeneratorRef};
 use crate::iop::target::Target;

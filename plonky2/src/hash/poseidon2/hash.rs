@@ -3,10 +3,10 @@ use core::fmt::Debug;
 use plonky2_field::ops::Square;
 
 use super::config::*;
-use crate::gates::poseidon2::Poseidon2Gate;
 use crate::field::extension::{Extendable, FieldExtension};
 use crate::field::goldilocks_field::GoldilocksField as F;
 use crate::field::types::{Field, PrimeField64};
+use crate::gates::poseidon2::Poseidon2Gate;
 use crate::hash::hash_types::{HashOut, RichField};
 use crate::hash::hashing::{compress, hash_n_to_hash_no_pad, PlonkyPermutation};
 use crate::iop::ext_target::ExtensionTarget;

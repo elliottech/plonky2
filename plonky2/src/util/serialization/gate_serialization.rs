@@ -110,8 +110,8 @@ pub mod default {
     use crate::gates::multiplication_extension::MulExtensionGate;
     use crate::gates::noop::NoopGate;
     use crate::gates::poseidon::PoseidonGate;
-    use crate::gates::poseidon_mds::PoseidonMdsGate;
     use crate::gates::poseidon2::Poseidon2Gate;
+    use crate::gates::poseidon_mds::PoseidonMdsGate;
     use crate::gates::public_input::PublicInputGate;
     use crate::gates::random_access::RandomAccessGate;
     use crate::gates::reducing::ReducingGate;
@@ -130,7 +130,9 @@ pub mod default {
     /// the `GateSerializer` trait. This can be easily done through the `impl_gate_serializer` macro.
     #[derive(Debug)]
     pub struct DefaultGateSerializer;
-    impl<F: RichField + Extendable<D> + Poseidon2, const D: usize> GateSerializer<F, D> for DefaultGateSerializer {
+    impl<F: RichField + Extendable<D> + Poseidon2, const D: usize> GateSerializer<F, D>
+        for DefaultGateSerializer
+    {
         impl_gate_serializer! {
             DefaultGateSerializer,
             ArithmeticGate,
