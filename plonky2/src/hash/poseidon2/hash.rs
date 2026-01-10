@@ -10,9 +10,9 @@ use crate::gates::poseidon2::Poseidon2Gate;
 use crate::hash::hash_types::{HashOut, RichField};
 use crate::hash::hashing::{compress, hash_n_to_hash_no_pad, PlonkyPermutation};
 use crate::iop::ext_target::ExtensionTarget;
-use crate::iop::target::{BoolTarget, Target};use crate::plonk::config::HasherType;
+use crate::iop::target::{BoolTarget, Target};
 use crate::plonk::circuit_builder::CircuitBuilder;
-use crate::plonk::config::{AlgebraicHasher, Hasher};
+use crate::plonk::config::{AlgebraicHasher, Hasher, HasherType};
 
 pub trait Poseidon2: PrimeField64 {
     #[inline]

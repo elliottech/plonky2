@@ -38,7 +38,7 @@ fn work<C: GenericConfig<2>>() -> Result<()> {
         cur_target = temp;
     }
 
-     #[cfg(feature = "cuda")]
+    #[cfg(feature = "cuda")]
     {
         use plonky2_util::log2_ceil;
 
