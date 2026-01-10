@@ -629,6 +629,18 @@ mod tests {
 
     #[test]
     fn test_mul_many() -> Result<()> {
+        #[cfg(feature = "cuda")]
+        {
+            zeknox::clear_cuda_errors_rs();
+            // Initialize twiddle factors for a range of sizes that might be used
+            for i in 0..=20 {
+                zeknox::init_twiddle_factors_rs(0, i);
+            }
+            // Initialize coset for Goldilocks field (coset generator = 7)
+            let coset_gen_u64 = 7u64;
+            zeknox::init_coset_rs(0, 20, coset_gen_u64);
+        }
+
         const D: usize = 2;
         type C = PoseidonGoldilocksConfig;
         type F = <C as GenericConfig<D>>::F;
@@ -665,6 +677,18 @@ mod tests {
 
     #[test]
     fn test_div_extension() -> Result<()> {
+        #[cfg(feature = "cuda")]
+        {
+            zeknox::clear_cuda_errors_rs();
+            // Initialize twiddle factors for a range of sizes that might be used
+            for i in 0..=20 {
+                zeknox::init_twiddle_factors_rs(0, i);
+            }
+            // Initialize coset for Goldilocks field (coset generator = 7)
+            let coset_gen_u64 = 7u64;
+            zeknox::init_coset_rs(0, 20, coset_gen_u64);
+        }
+
         const D: usize = 2;
         type C = PoseidonGoldilocksConfig;
         type F = <C as GenericConfig<D>>::F;
@@ -692,6 +716,18 @@ mod tests {
 
     #[test]
     fn test_mul_algebra() -> Result<()> {
+        #[cfg(feature = "cuda")]
+        {
+            zeknox::clear_cuda_errors_rs();
+            // Initialize twiddle factors for a range of sizes that might be used
+            for i in 0..=20 {
+                zeknox::init_twiddle_factors_rs(0, i);
+            }
+            // Initialize coset for Goldilocks field (coset generator = 7)
+            let coset_gen_u64 = 7u64;
+            zeknox::init_coset_rs(0, 20, coset_gen_u64);
+        }
+
         const D: usize = 2;
         type C = KeccakGoldilocksConfig;
         type F = <C as GenericConfig<D>>::F;

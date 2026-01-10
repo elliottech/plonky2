@@ -62,10 +62,14 @@ impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>
         timing: &mut TimingTree,
         fft_root_table: Option<&FftRootTable<F>>,
     ) -> Self {
+        // The first IFFT is always done on CPU to avoid strange GPU issue.
         let coeffs = timed!(
             timing,
-            "IFFT",
-            values.into_par_iter().map(|v| v.ifft()).collect::<Vec<_>>()
+            "CPU IFFT",
+            values
+                .into_par_iter()
+                .map(|v| v.ifft_cpu())
+                .collect::<Vec<_>>()
         );
 
         Self::from_coeffs(
@@ -87,6 +91,35 @@ impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>
         timing: &mut TimingTree,
         fft_root_table: Option<&FftRootTable<F>>,
     ) -> Self {
+        #[cfg(feature = "cuda")]
+        return Self::from_coeffs_gpu(
+            polynomials,
+            rate_bits,
+            blinding,
+            cap_height,
+            timing,
+            fft_root_table,
+        );
+        #[cfg(not(feature = "cuda"))]
+        Self::from_coeffs_cpu(
+            polynomials,
+            rate_bits,
+            blinding,
+            cap_height,
+            timing,
+            fft_root_table,
+        )
+    }
+
+    /// Creates a list polynomial commitment for the polynomials `polynomials`.
+    fn from_coeffs_cpu(
+        polynomials: Vec<PolynomialCoeffs<F>>,
+        rate_bits: usize,
+        blinding: bool,
+        cap_height: usize,
+        timing: &mut TimingTree,
+        fft_root_table: Option<&FftRootTable<F>>,
+    ) -> Self {
         let degree = polynomials[0].len();
         let lde_values = timed!(
             timing,
@@ -99,7 +132,171 @@ impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>
         let merkle_tree = timed!(
             timing,
             "build Merkle tree",
-            MerkleTree::new(leaves, cap_height)
+            MerkleTree::new_from_2d(leaves, cap_height)
+        );
+
+        Self {
+            polynomials,
+            merkle_tree,
+            degree_log: log2_strict(degree),
+            rate_bits,
+            blinding,
+        }
+    }
+
+    #[cfg(feature = "cuda")]
+    fn from_coeffs_gpu(
+        polynomials: Vec<PolynomialCoeffs<F>>,
+        rate_bits: usize,
+        blinding: bool,
+        cap_height: usize,
+        timing: &mut TimingTree,
+        _fft_root_table: Option<&FftRootTable<F>>,
+    ) -> Self {
+        assert!(F::CUDA_SUPPORT, "CUDA is not support for this field");
+
+        let degree = polynomials[0].len();
+
+        // If blinding, salt with two random elements to each leaf vector.
+        let salt_size = if blinding { SALT_SIZE } else { 0 };
+
+        Self::from_coeffs_gpu_helper(
+            polynomials,
+            rate_bits,
+            blinding,
+            cap_height,
+            timing,
+            degree,
+            salt_size,
+        )
+    }
+
+    #[cfg(feature = "cuda")]
+    fn from_coeffs_gpu_helper(
+        polynomials: Vec<PolynomialCoeffs<F>>,
+        rate_bits: usize,
+        blinding: bool,
+        cap_height: usize,
+        timing: &mut TimingTree,
+        degree: usize,
+        salt_size: usize,
+    ) -> Self {
+        use plonky2_field::util::vec_zeroed;
+        use zeknox::device::memory::HostOrDeviceSlice;
+        use zeknox::types::{NTTConfig, TransposeConfig};
+        use zeknox::{ntt_batch_ptr, transpose_rev_batch};
+
+        let lde_size = degree << rate_bits;
+        let num_polys = polynomials.len() + salt_size;
+        let total_alloc_size = num_polys * lde_size;
+
+        let salt_polys = (0..salt_size)
+            .map(|_| F::rand_vec(lde_size))
+            .collect::<Vec<_>>();
+
+        // Step 1: Compute coset FFT on GPU, keeping data on GPU
+        let gpu_lde_values = timed!(timing, "GPU coset FFT", {
+            // Allocate GPU memory for all polynomials
+            log::debug!(
+                "Allocating GPU memory for {} polynomials of size {} (total {} elements)",
+                num_polys,
+                lde_size,
+                total_alloc_size
+            );
+
+            let mut gpu_buffer = timed!(
+                timing,
+                format!("cuda alloc memory for {} elements", total_alloc_size).as_ref(),
+                HostOrDeviceSlice::cuda_malloc(0, total_alloc_size)
+                    .expect("Failed to allocate GPU memory")
+            );
+
+            // Copy all data to GPU in one go
+            let mut flat_data = timed!(timing, "Prepare CPU memory", unsafe {
+                vec_zeroed::<F>(total_alloc_size)
+            });
+
+            timed!(timing, "Copy CPU memory", {
+                for i in 0..polynomials.len() {
+                    flat_data[i * lde_size..i * lde_size + degree]
+                        .copy_from_slice(polynomials[i].coeffs.as_ref())
+                }
+                for i in polynomials.len()..num_polys {
+                    flat_data[i * lde_size..(i + 1) * lde_size]
+                        .copy_from_slice(salt_polys[i - polynomials.len()].as_slice());
+                }
+            });
+
+            timed!(
+                timing,
+                "CPU to GPU",
+                gpu_buffer
+                    .copy_from_host(&flat_data)
+                    .expect("Failed to copy data to GPU")
+            );
+
+            // Perform batched NTT on GPU
+            // Technically we don't really need to do FFTs for the salt polynomial
+            // but then the cuda memory becomes extremely difficult to handle
+            // so we might as well do those FFTs.
+            let log_domain_size = log2_strict(lde_size);
+            let ntt_config = NTTConfig {
+                batches: num_polys as u32,
+                are_inputs_on_device: true,
+                are_outputs_on_device: true,
+                with_coset: true,
+                ..Default::default()
+            };
+            timed!(
+                timing,
+                format!(
+                    "GPU batch NTT for {} poly of degree {}",
+                    num_polys, lde_size
+                )
+                .as_ref(),
+                ntt_batch_ptr(0, gpu_buffer.as_mut_ptr(), log_domain_size, ntt_config)
+            );
+            gpu_buffer
+        });
+
+        // Step 2: Transpose on GPU using Zeknox
+        let gpu_transposed = timed!(timing, "GPU transpose", {
+            let mut gpu_output = HostOrDeviceSlice::cuda_malloc(0, total_alloc_size)
+                .expect("Failed to allocate GPU memory for transpose");
+
+            let log_n = log2_strict(lde_size);
+            let transpose_config = TransposeConfig {
+                batches: num_polys as u32,
+                are_inputs_on_device: true,
+                are_outputs_on_device: true,
+            };
+
+            transpose_rev_batch(
+                0,
+                gpu_output.as_mut_ptr(),
+                gpu_lde_values.as_ptr(),
+                log_n,
+                transpose_config,
+            );
+
+            gpu_output
+        });
+
+        // Step 3: Copy back to CPU
+        let leaves_1d = timed!(timing, "GPU to CPU", {
+            let mut cpu_data = vec![F::ZERO; total_alloc_size];
+
+            gpu_transposed
+                .copy_to_host(&mut cpu_data, total_alloc_size)
+                .expect("Failed to copy data from GPU");
+
+            cpu_data
+        });
+
+        let merkle_tree = timed!(
+            timing,
+            "build Merkle tree",
+            MerkleTree::new_from_1d(leaves_1d, polynomials.len(), cap_height)
         );
 
         Self {
@@ -142,7 +339,7 @@ impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>
     pub fn get_lde_values(&self, index: usize, step: usize) -> &[F] {
         let index = index * step;
         let index = reverse_bits(index, self.degree_log + self.rate_bits);
-        let slice = &self.merkle_tree.leaves[index];
+        let slice = &self.merkle_tree.get(index);
         &slice[..slice.len() - if self.blinding { SALT_SIZE } else { 0 }]
     }
 

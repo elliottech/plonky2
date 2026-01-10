@@ -36,7 +36,6 @@ pub fn generate_partial_witness<
     let config = &common_data.config;
     let generators = &prover_data.generators;
     let generator_indices_by_watches = &prover_data.generator_indices_by_watches;
-
     let mut witness = PartitionWitness::new(
         config.num_wires,
         common_data.degree(),

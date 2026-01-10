@@ -11,12 +11,22 @@ repository.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
+
 [features]
-default = ["gate_testing", "parallel", "rand_chacha", "std", "timing"]
+# default = ["gate_testing", "rand_chacha", "std", "timing", "cuda"]
+# default = ["gate_testing", "parallel", "rand_chacha", "std", "timing", ]
+# 
+default = ["gate_testing", "parallel", "rand_chacha", "std", "cuda", "timing", ]
+# default = ["gate_testing", "rand_chacha", "std", "cuda", "timing", "cuda_sanity_check"]
+# default = ["gate_testing", "parallel", "rand_chacha", "std", "cuda", "timing", "cuda_sanity_check"]
 gate_testing = []
 parallel = ["hashbrown/rayon", "plonky2_maybe_rayon/parallel"]
 std = ["anyhow/std", "rand/std", "itertools/use_std"]
 timing = ["std", "dep:web-time"]
+cuda = ["plonky2_field/cuda"]
+# sanity check: when this flag is on, the computation will done on both CPU and CUDA, and the results compared
+cuda_sanity_check = [ "cuda", "plonky2_field/cuda_sanity_check" ]
+
 
 [dependencies]
 ahash = { workspace = true }
@@ -26,6 +36,7 @@ itertools = { workspace = true }
 keccak-hash = { version = "0.8.0", default-features = false }
 log = { workspace = true }
 num = { workspace = true }
+once_cell = { workspace = true, features = ["std"] }
 rand = { workspace = true }
 rand_chacha = { version = "0.3.1", optional = true, default-features = false }
 serde = { workspace = true, features = ["rc"] }
@@ -37,6 +48,9 @@ web-time = { version = "1.0.0", optional = true }
 plonky2_field = { version = "1.0.0", path = "../field", default-features = false }
 plonky2_maybe_rayon = { version = "1.0.0", path = "../maybe_rayon", default-features = false }
 plonky2_util = { version = "1.0.0", path = "../util", default-features = false }
+
+# cuda accelerator wrapper
+zeknox = { workspace = true }
 
 # Plonky3 dependencies for Poseidon2
 p3-poseidon2 = { git = "https://github.com/Plonky3/Plonky3.git", rev = "eeb4e37b20127c4daa871b2bad0df30a7c7380db" }

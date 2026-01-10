@@ -240,6 +240,7 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
 
     /// Same as `verify_batch_merkle_proof_to_cap`, except with the final "cap index" as separate parameter,
     /// rather than being contained in `leaf_index_bits`.
+    #[allow(dead_code)]
     pub(crate) fn verify_batch_merkle_proof_to_cap_with_cap_index<H: AlgebraicHasher<F>>(
         &mut self,
         leaf_data: &[Vec<Target>],
@@ -342,7 +343,8 @@ mod tests {
         let n = 1 << log_n;
         let cap_height = 1;
         let leaves = random_data::<F>(n, 7);
-        let tree = MerkleTree::<F, <C as GenericConfig<D>>::Hasher>::new(leaves, cap_height);
+        let tree =
+            MerkleTree::<F, <C as GenericConfig<D>>::Hasher>::new_from_2d(leaves, cap_height);
         let i: usize = OsRng.gen_range(0..n);
         let proof = tree.prove(i);
 
@@ -359,9 +361,10 @@ mod tests {
         let i_c = builder.constant(F::from_canonical_usize(i));
         let i_bits = builder.split_le(i_c, log_n);
 
-        let data = builder.add_virtual_targets(tree.leaves[i].len());
+        let data = builder.add_virtual_targets(tree.leaf_size);
+        let leaf = tree.get(i);
         for j in 0..data.len() {
-            pw.set_target(data[j], tree.leaves[i][j])?;
+            pw.set_target(data[j], leaf[j])?;
         }
 
         builder.verify_merkle_proof_to_cap::<<C as GenericConfig<D>>::InnerHasher>(

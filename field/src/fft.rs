@@ -11,6 +11,36 @@ use crate::types::Field;
 
 pub type FftRootTable<F> = Vec<Vec<F>>;
 
+pub fn batch_fft<F: Field>(input: &[PolynomialCoeffs<F>]) -> Vec<PolynomialValues<F>> {
+    #[cfg(feature = "cuda")]
+    {
+        use zeknox::ntt_batch;
+        use zeknox::types::NTTConfig;
+
+        let mut data = input
+            .iter()
+            .flat_map(|poly| poly.coeffs.clone())
+            .collect::<Vec<F>>();
+        let mut cfg = NTTConfig::default();
+        cfg.batches = input.len() as u32;
+        let poly_len = input[0].len();
+        ntt_batch(0, &mut data, log2_strict(poly_len), cfg);
+
+        data.chunks(poly_len)
+            .map(|chunk| PolynomialValues::new(chunk.to_vec()))
+            .collect()
+    }
+    #[cfg(not(feature = "cuda"))]
+    {
+        let mut res = Vec::with_capacity(input.len());
+        for poly in input.iter() {
+            let pv = fft_with_options(poly.clone(), None, None);
+            res.push(pv);
+        }
+        res
+    }
+}
+
 pub fn fft_root_table<F: Field>(n: usize) -> FftRootTable<F> {
     let lg_n = log2_strict(n);
     // bases[i] = g^2^i, for i = 0, ..., lg_n - 1
@@ -32,16 +62,72 @@ pub fn fft_root_table<F: Field>(n: usize) -> FftRootTable<F> {
     root_table
 }
 
+#[cfg(feature = "cuda")]
+fn fft_dispatch_gpu<F: Field>(
+    input: &mut [F],
+    zero_factor: Option<usize>,
+    root_table: Option<&FftRootTable<F>>,
+) {
+    if F::CUDA_SUPPORT {
+        use zeknox::ntt_batch;
+        use zeknox::types::NTTConfig;
+
+        #[cfg(feature = "cuda_sanity_check")]
+        let cpu_res = {
+            let mut input_clone = input.to_vec();
+            fft_dispatch_cpu(&mut input_clone, zero_factor, root_table);
+            input_clone
+        };
+
+        ntt_batch(
+            0,
+            input,
+            input.len().trailing_zeros() as usize,
+            NTTConfig::default(),
+        );
+
+        #[cfg(feature = "cuda_sanity_check")]
+        for (i, (a, b)) in input.iter().zip(cpu_res.iter()).enumerate() {
+            if a != b {
+                panic!(
+                    "Mismatch at index {}: gpu result = {}, cpu result = {}",
+                    i, a, b
+                );
+            }
+        }
+        return;
+    } else {
+        return fft_dispatch_cpu(input, zero_factor, root_table);
+    }
+}
+
+fn fft_dispatch_cpu<F: Field>(
+    input: &mut [F],
+    zero_factor: Option<usize>,
+    root_table: Option<&FftRootTable<F>>,
+) {
+    if root_table.is_some() {
+        fft_classic(input, zero_factor.unwrap_or(0), root_table.unwrap())
+    } else {
+        let computed = fft_root_table::<F>(input.len());
+        fft_classic(input, zero_factor.unwrap_or(0), computed.as_ref())
+    };
+}
+
 #[inline]
 fn fft_dispatch<F: Field>(
     input: &mut [F],
     zero_factor: Option<usize>,
     root_table: Option<&FftRootTable<F>>,
 ) {
-    let computed_root_table = root_table.is_none().then(|| fft_root_table(input.len()));
-    let used_root_table = root_table.or(computed_root_table.as_ref()).unwrap();
-
-    fft_classic(input, zero_factor.unwrap_or(0), used_root_table);
+    #[cfg(feature = "cuda")]
+    {
+        fft_dispatch_gpu(input, zero_factor, root_table)
+    }
+    #[cfg(not(feature = "cuda"))]
+    {
+        fft_dispatch_cpu(input, zero_factor, root_table)
+    }
 }
 
 #[inline]
@@ -50,6 +136,7 @@ pub fn fft<F: Field>(poly: PolynomialCoeffs<F>) -> PolynomialValues<F> {
 }
 
 #[inline]
+
 pub fn fft_with_options<F: Field>(
     poly: PolynomialCoeffs<F>,
     zero_factor: Option<usize>,
@@ -63,6 +150,28 @@ pub fn fft_with_options<F: Field>(
 #[inline]
 pub fn ifft<F: Field>(poly: PolynomialValues<F>) -> PolynomialCoeffs<F> {
     ifft_with_options(poly, None, None)
+}
+
+#[inline]
+pub fn ifft_cpu<F: Field>(poly: PolynomialValues<F>) -> PolynomialCoeffs<F> {
+    let n = poly.len();
+    let lg_n = log2_strict(n);
+    let n_inv = F::inverse_2exp(lg_n);
+
+    let PolynomialValues { values: mut buffer } = poly;
+    fft_dispatch_cpu(&mut buffer, None, None);
+
+    // We reverse all values except the first, and divide each by n.
+    buffer[0] *= n_inv;
+    buffer[n / 2] *= n_inv;
+    for i in 1..(n / 2) {
+        let j = n - i;
+        let coeffs_i = buffer[j] * n_inv;
+        let coeffs_j = buffer[i] * n_inv;
+        buffer[i] = coeffs_i;
+        buffer[j] = coeffs_j;
+    }
+    PolynomialCoeffs { coeffs: buffer }
 }
 
 pub fn ifft_with_options<F: Field>(
@@ -214,6 +323,17 @@ mod tests {
 
     #[test]
     fn fft_and_ifft() {
+        #[cfg(feature = "cuda")]
+        {
+            zeknox::clear_cuda_errors_rs();
+            // Initialize twiddle factors for sizes we'll use
+            // degree_padded is 256 = 2^8
+            // lde then add 4 more bits
+            for i in 8..=12 {
+                zeknox::init_twiddle_factors_rs(0, i);
+            }
+        }
+
         type F = GoldilocksField;
         let degree = 200usize;
         let degree_padded = degree.next_power_of_two();
@@ -222,7 +342,7 @@ mod tests {
         // "random", the last degree_padded-degree of them are zero.
         let coeffs = (0..degree)
             .map(|i| F::from_canonical_usize(i * 1337 % 100))
-            .chain(core::iter::repeat_n(F::ZERO, degree_padded - degree))
+            .chain(core::iter::repeat(F::ZERO).take(degree_padded - degree))
             .collect::<Vec<_>>();
         assert_eq!(coeffs.len(), degree_padded);
         let coefficients = PolynomialCoeffs { coeffs };

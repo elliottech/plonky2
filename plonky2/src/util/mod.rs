@@ -3,7 +3,7 @@
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 
-use plonky2_maybe_rayon::*;
+use plonky2_maybe_rayon::{MaybeIntoParIter, ParallelIterator};
 #[doc(inline)]
 pub use plonky2_util::*;
 
@@ -23,7 +23,12 @@ pub(crate) fn transpose_poly_values<F: Field>(polys: Vec<PolynomialValues<F>>) -
 }
 
 pub fn transpose<T: Send + Sync + Copy>(matrix: &[Vec<T>]) -> Vec<Vec<T>> {
+    if matrix.is_empty() {
+        return vec![];
+    }
+
     let len = matrix[0].len();
+
     (0..len)
         .into_par_iter()
         .map(|i| matrix.iter().map(|row| row[i]).collect())

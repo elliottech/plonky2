@@ -38,6 +38,27 @@ fn work<C: GenericConfig<2>>() -> Result<()> {
         cur_target = temp;
     }
 
+    #[cfg(feature = "cuda")]
+    {
+        use plonky2_util::log2_ceil;
+
+        let size = log2_ceil(builder.num_gates());
+
+        zeknox::clear_cuda_errors_rs();
+        println!(
+            "Initializing CUDA twiddle factors for dimeinsions 2^{} and 2^{}",
+            size,
+            size + 3
+        );
+
+        zeknox::init_twiddle_factors_rs(0, size);
+        zeknox::init_twiddle_factors_rs(0, size + 3);
+
+        // For Goldilocks field, the coset generator is 7 (MULTIPLICATIVE_GROUP_GENERATOR)
+        let coset_gen_u64 = 7u64;
+        zeknox::init_coset_rs(0, size + 3, coset_gen_u64);
+    }
+
     // Public inputs are the two initial values (provided below) and the result (which is generated).
     builder.register_public_input(initial_a);
     builder.register_public_input(initial_b);

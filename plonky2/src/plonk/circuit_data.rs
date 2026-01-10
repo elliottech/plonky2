@@ -19,6 +19,7 @@ use core::ops::{Range, RangeFrom};
 use std::collections::BTreeMap;
 
 use anyhow::Result;
+use log::Level;
 use serde::Serialize;
 
 use super::circuit_builder::LookupWire;
@@ -213,12 +214,11 @@ impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>
     }
 
     pub fn prove(&self, inputs: PartialWitness<F>) -> Result<ProofWithPublicInputs<F, C, D>> {
-        prove::<F, C, D>(
-            &self.prover_only,
-            &self.common,
-            inputs,
-            &mut TimingTree::default(),
-        )
+        let mut timing = TimingTree::new("CircuitData::prove", Level::Debug);
+
+        let res = prove::<F, C, D>(&self.prover_only, &self.common, inputs, &mut timing);
+        timing.print();
+        res
     }
 
     pub fn verify(&self, proof_with_pis: ProofWithPublicInputs<F, C, D>) -> Result<()> {

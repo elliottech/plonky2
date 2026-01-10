@@ -211,20 +211,29 @@ pub(crate) fn eval_vanishing_poly_base_batch<F: RichField + Extendable<D>, const
     let num_challenges = common_data.config.num_challenges;
     let num_routed_wires = common_data.config.num_routed_wires;
 
-    let mut numerator_values = Vec::with_capacity(num_routed_wires);
-    let mut denominator_values = Vec::with_capacity(num_routed_wires);
+    // Pre-allocate reusable buffers with exact capacities
+    let mut numerator_values = Vec::with_capacity(num_routed_wires * num_challenges);
+    let mut denominator_values = Vec::with_capacity(num_routed_wires * num_challenges);
 
     // The L_0(x) (Z(x) - 1) vanishing terms.
     let mut vanishing_z_1_terms = Vec::with_capacity(num_challenges);
     // The terms checking the partial products.
-    let mut vanishing_partial_products_terms = Vec::new();
+    let mut vanishing_partial_products_terms = Vec::with_capacity(num_challenges * num_prods);
 
     // The terms checking the lookup constraints.
-    let mut vanishing_all_lookup_terms = if has_lookup {
+    let lookup_terms_capacity = if has_lookup {
         let num_sldc_polys = common_data.num_lookup_polys - 1;
-        Vec::with_capacity(
-            common_data.config.num_challenges * (4 + common_data.luts.len() + 2 * num_sldc_polys),
-        )
+        num_challenges * (4 + common_data.luts.len() + 2 * num_sldc_polys)
+    } else {
+        0
+    };
+    let mut vanishing_all_lookup_terms = Vec::with_capacity(lookup_terms_capacity);
+
+    // Pre-allocate selector buffer if needed
+    let selector_offset = common_data.selectors_info.num_selectors();
+    let num_lookup_selectors = common_data.num_lookup_selectors;
+    let mut lookup_selectors = if has_lookup && num_lookup_selectors > 0 {
+        Vec::with_capacity(num_lookup_selectors)
     } else {
         Vec::new()
     };
@@ -235,22 +244,20 @@ pub(crate) fn eval_vanishing_poly_base_batch<F: RichField + Extendable<D>, const
         let x = xs_batch[k];
         let vars = vars_batch.view(k);
 
-        let lookup_selectors: Vec<F> = (0..common_data.num_lookup_selectors)
-            .map(|i| vars.local_constants[common_data.selectors_info.num_selectors() + i])
-            .collect();
+        // Reuse lookup_selectors buffer
+        if has_lookup {
+            lookup_selectors.clear();
+            lookup_selectors.extend(
+                (0..num_lookup_selectors).map(|i| vars.local_constants[selector_offset + i]),
+            );
+        }
 
         let local_zs = local_zs_batch[k];
         let next_zs = next_zs_batch[k];
-        let local_lookup_zs = if has_lookup {
-            local_lookup_zs_batch[k]
+        let (local_lookup_zs, next_lookup_zs) = if has_lookup {
+            (local_lookup_zs_batch[k], next_lookup_zs_batch[k])
         } else {
-            &[]
-        };
-
-        let next_lookup_zs = if has_lookup {
-            next_lookup_zs_batch[k]
-        } else {
-            &[]
+            (&[][..], &[][..])
         };
 
         let partial_products = partial_products_batch[k];
@@ -259,6 +266,16 @@ pub(crate) fn eval_vanishing_poly_base_batch<F: RichField + Extendable<D>, const
         let constraint_terms = PackedStridedView::new(&constraint_terms_batch, n, k);
 
         let l_0_x = z_h_on_coset.eval_l_0(index, x);
+
+        // Pre-compute common values for all challenges
+        let beta_x_s_ids: Vec<F> = if num_challenges > 0 {
+            (0..num_routed_wires)
+                .map(|j| common_data.k_is[j] * x)
+                .collect()
+        } else {
+            Vec::new()
+        };
+
         for i in 0..num_challenges {
             let z_x = local_zs[i];
             let z_gx = next_zs[i];
@@ -268,10 +285,10 @@ pub(crate) fn eval_vanishing_poly_base_batch<F: RichField + Extendable<D>, const
             if has_lookup {
                 let cur_deltas = &deltas[NUM_COINS_LOOKUP * i..NUM_COINS_LOOKUP * (i + 1)];
 
-                let cur_local_lookup_zs = &local_lookup_zs
-                    [common_data.num_lookup_polys * i..common_data.num_lookup_polys * (i + 1)];
-                let cur_next_lookup_zs = &next_lookup_zs
-                    [common_data.num_lookup_polys * i..common_data.num_lookup_polys * (i + 1)];
+                let lookup_poly_start = common_data.num_lookup_polys * i;
+                let lookup_poly_end = lookup_poly_start + common_data.num_lookup_polys;
+                let cur_local_lookup_zs = &local_lookup_zs[lookup_poly_start..lookup_poly_end];
+                let cur_next_lookup_zs = &next_lookup_zs[lookup_poly_start..lookup_poly_end];
 
                 let lookup_constraints = check_lookup_constraints_batch(
                     common_data,
@@ -285,17 +302,17 @@ pub(crate) fn eval_vanishing_poly_base_batch<F: RichField + Extendable<D>, const
                 vanishing_all_lookup_terms.extend(lookup_constraints);
             }
 
-            numerator_values.extend((0..num_routed_wires).map(|j| {
+            let beta_i = betas[i];
+            let gamma_i = gammas[i];
+
+            // Compute numerators and denominators in a single pass
+            for j in 0..num_routed_wires {
                 let wire_value = vars.local_wires[j];
-                let k_i = common_data.k_is[j];
-                let s_id = k_i * x;
-                wire_value + betas[i] * s_id + gammas[i]
-            }));
-            denominator_values.extend((0..num_routed_wires).map(|j| {
-                let wire_value = vars.local_wires[j];
-                let s_sigma = s_sigmas[j];
-                wire_value + betas[i] * s_sigma + gammas[i]
-            }));
+                numerator_values
+                    .push(wire_value + gamma_i.multiply_accumulate(beta_i, beta_x_s_ids[j]));
+                denominator_values
+                    .push(wire_value + gamma_i.multiply_accumulate(beta_i, s_sigmas[j]));
+            }
 
             // The partial products considered for this iteration of `i`.
             let current_partial_products = &partial_products[i * num_prods..(i + 1) * num_prods];
@@ -587,7 +604,9 @@ pub fn check_lookup_constraints_batch<F: RichField + Extendable<D>, const D: usi
     // Check RE row transition constraint.
     let mut cur_sum = next_z_re;
     for elt in &current_lookup_combos {
-        cur_sum = cur_sum * deltas[LookupChallenges::ChallengeDelta as usize] + *elt;
+        // cur_sum = cur_sum * deltas[LookupChallenges::ChallengeDelta as usize] + *elt;
+        cur_sum =
+            elt.multiply_accumulate(cur_sum, deltas[LookupChallenges::ChallengeDelta as usize]);
     }
     let unfiltered_re_line = z_re - cur_sum;
 
@@ -639,7 +658,10 @@ pub fn check_lookup_constraints_batch<F: RichField + Extendable<D>, const D: usi
         let lut_sum_prods_with_mul = (poly * lut_degree
             ..min((poly + 1) * lut_degree, num_lut_slots))
             .fold(F::ZERO, |acc, i| {
-                acc + vars.local_wires[LookupTableGate::wire_ith_multiplicity(i)] * lut_prod_i(i)
+                acc.multiply_accumulate(
+                    vars.local_wires[LookupTableGate::wire_ith_multiplicity(i)],
+                    lut_prod_i(i),
+                )
             });
 
         // The previous element is the previous poly of the current row or the last poly of the next row.
@@ -656,7 +678,8 @@ pub fn check_lookup_constraints_batch<F: RichField + Extendable<D>, const D: usi
             .push(lookup_selectors[LookupSelectors::TransSre as usize] * unfiltered_sum_transition);
 
         // Check LDC row and col transitions. It's the same constraint, with a row transition happening for slot == 0.
-        let unfiltered_ldc_transition = lu_prod * (z_x_lookup_sldcs[poly] - prev) + lu_sum_prods;
+        let unfiltered_ldc_transition =
+            lu_sum_prods.multiply_accumulate(lu_prod, z_x_lookup_sldcs[poly] - prev);
         constraints
             .push(lookup_selectors[LookupSelectors::TransLdc as usize] * unfiltered_ldc_transition);
     }

@@ -12,7 +12,7 @@ use plonky2_util::log2_strict;
 use serde::{Deserialize, Serialize};
 
 use crate::extension::{Extendable, FieldExtension};
-use crate::fft::{fft, fft_with_options, ifft, FftRootTable};
+use crate::fft::{fft, fft_with_options, ifft, ifft_cpu, FftRootTable};
 use crate::types::Field;
 
 /// A polynomial in point-value form.
@@ -55,8 +55,15 @@ impl<F: Field> PolynomialValues<F> {
         self.values.len()
     }
 
+    /// Adaptive IFFT: uses GPU if available, otherwise CPU.
     pub fn ifft(self) -> PolynomialCoeffs<F> {
         ifft(self)
+    }
+
+    /// Enfored to use CPU IFFT.
+    /// Used for bypass the GPU issue during setup phase.
+    pub fn ifft_cpu(self) -> PolynomialCoeffs<F> {
+        ifft_cpu(self)
     }
 
     /// Returns the polynomial whose evaluation on the coset `shift*H` is `self`.
@@ -438,7 +445,6 @@ impl<F: Field> Mul for &PolynomialCoeffs<F> {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Instant;
 
     use rand::rngs::OsRng;
     use rand::Rng;
@@ -446,6 +452,17 @@ mod tests {
     use super::*;
     use crate::goldilocks_field::GoldilocksField;
     use crate::types::Sample;
+
+    #[cfg(feature = "cuda")]
+    fn init_gpu_for_tests() {
+        zeknox::clear_cuda_errors_rs();
+        // Initialize twiddle factors for various sizes
+        for i in 0..=20 {
+            zeknox::init_twiddle_factors_rs(0, i);
+        }
+        let coset_gen_u64 = 7u64;
+        zeknox::init_coset_rs(0, 20, coset_gen_u64);
+    }
 
     #[test]
     fn test_trimmed() {
@@ -475,6 +492,9 @@ mod tests {
 
     #[test]
     fn test_coset_fft() {
+        #[cfg(feature = "cuda")]
+        init_gpu_for_tests();
+
         type F = GoldilocksField;
 
         let k = 8;
@@ -496,6 +516,9 @@ mod tests {
 
     #[test]
     fn test_coset_ifft() {
+        #[cfg(feature = "cuda")]
+        init_gpu_for_tests();
+
         type F = GoldilocksField;
 
         let k = 8;
@@ -601,7 +624,10 @@ mod tests {
     // Test to see which polynomial division method is faster for divisions of the type
     // `(X^n - 1)/(X - a)
     #[test]
+    #[cfg(not(feature = "cuda"))]
     fn test_division_linear() {
+        use std::time::Instant;
+
         type F = GoldilocksField;
         let mut rng = OsRng;
         let l = 14;
