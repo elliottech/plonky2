@@ -206,14 +206,18 @@ mod tests {
 
     use crate::field::extension::Extendable;
     use crate::field::types::{Field, PrimeField64};
+    use crate::gates::constant::ConstantGate;
     use crate::gates::noop::NoopGate;
     use crate::hash::hash_types::{HashOutTarget, RichField};
     use crate::hash::hashing::hash_n_to_hash_no_pad;
-    use crate::hash::poseidon::{PoseidonHash, PoseidonPermutation};
+    use crate::hash::poseidon::PoseidonPermutation;
+    use crate::hash::poseidon2::hash::{Poseidon2, Poseidon2Permutation};
     use crate::iop::witness::{PartialWitness, WitnessWrite};
     use crate::plonk::circuit_builder::CircuitBuilder;
     use crate::plonk::circuit_data::{CircuitConfig, CommonCircuitData};
-    use crate::plonk::config::{AlgebraicHasher, GenericConfig, PoseidonGoldilocksConfig};
+    use crate::plonk::config::{
+        AlgebraicHasher, GenericConfig, Poseidon2GoldilocksConfig, PoseidonGoldilocksConfig,
+    };
     use crate::recursion::cyclic_recursion::check_cyclic_proof_verifier_data;
     use crate::recursion::dummy_circuit::cyclic_base_proof;
 
@@ -222,7 +226,9 @@ mod tests {
         F: RichField + Extendable<D>,
         C: GenericConfig<D, F = F>,
         const D: usize,
-    >() -> CommonCircuitData<F, D>
+    >(
+        use_poseidon2: bool,
+    ) -> CommonCircuitData<F, D>
     where
         C::Hasher: AlgebraicHasher<F>,
     {
@@ -243,6 +249,17 @@ mod tests {
         let verifier_data =
             builder.add_virtual_verifier_data(data.common.config.fri_config.cap_height);
         builder.verify_proof::<C>(&proof, &verifier_data, &data.common);
+
+        if use_poseidon2 {
+            // Add a constant to ensure ConstantGate is included in the gate set
+            // This matches what the actual cyclic recursion circuit will do
+            builder.add_gate(
+                ConstantGate {
+                    num_consts: builder.config.num_constants,
+                },
+                vec![],
+            );
+        }
         while builder.num_gates() < 1 << 12 {
             builder.add_gate(NoopGate, vec![]);
         }
@@ -257,12 +274,19 @@ mod tests {
     /// - VK for cyclic recursion (?)
     #[test]
     fn test_cyclic_recursion() -> Result<()> {
-        const D: usize = 2;
-        type C = PoseidonGoldilocksConfig;
-        type F = <C as GenericConfig<D>>::F;
+        cyclic_recursion::<PoseidonGoldilocksConfig, 2>(false)?;
+        cyclic_recursion::<Poseidon2GoldilocksConfig, 2>(true)
+    }
 
+    fn cyclic_recursion<C: GenericConfig<D> + 'static, const D: usize>(
+        use_poseidon2: bool,
+    ) -> Result<()>
+    where
+        C::Hasher: AlgebraicHasher<C::F>,
+        C::F: Poseidon2,
+    {
         let config = CircuitConfig::standard_recursion_config();
-        let mut builder = CircuitBuilder::<F, D>::new(config);
+        let mut builder = CircuitBuilder::<C::F, D>::new(config);
         let one = builder.one();
 
         // Circuit that computes a repeated hash.
@@ -270,11 +294,11 @@ mod tests {
         builder.register_public_inputs(&initial_hash_target.elements);
         let current_hash_in = builder.add_virtual_hash();
         let current_hash_out =
-            builder.hash_n_to_hash_no_pad::<PoseidonHash>(current_hash_in.elements.to_vec());
+            builder.hash_n_to_hash_no_pad::<C::InnerHasher>(current_hash_in.elements.to_vec());
         builder.register_public_inputs(&current_hash_out.elements);
         let counter = builder.add_virtual_public_input();
 
-        let mut common_data = common_data_for_recursion::<F, C, D>();
+        let mut common_data = common_data_for_recursion::<C::F, C, D>(use_poseidon2);
         let verifier_data_target = builder.add_verifier_data_public_inputs();
         common_data.num_public_inputs = builder.num_public_inputs();
 
@@ -310,7 +334,12 @@ mod tests {
         let cyclic_circuit_data = builder.build::<C>();
 
         let mut pw = PartialWitness::new();
-        let initial_hash = [F::ZERO, F::ONE, F::TWO, F::from_canonical_usize(3)];
+        let initial_hash = [
+            C::F::ZERO,
+            C::F::ONE,
+            C::F::TWO,
+            C::F::from_canonical_usize(3),
+        ];
         let initial_hash_pis = initial_hash.into_iter().enumerate().collect();
         pw.set_bool_target(condition, false)?;
         pw.set_proof_with_pis_target::<C, D>(
@@ -359,19 +388,31 @@ mod tests {
         let initial_hash = &proof.public_inputs[..4];
         let hash = &proof.public_inputs[4..8];
         let counter = proof.public_inputs[8];
-        let expected_hash: [F; 4] = iterate_poseidon(
+        let expected_hash: [C::F; 4] = iterate_poseidon(
             initial_hash.try_into().unwrap(),
             counter.to_canonical_u64() as usize,
+            use_poseidon2,
         );
         assert_eq!(hash, expected_hash);
 
         cyclic_circuit_data.verify(proof)
     }
 
-    fn iterate_poseidon<F: RichField>(initial_state: [F; 4], n: usize) -> [F; 4] {
+    fn iterate_poseidon<F: RichField + Poseidon2>(
+        initial_state: [F; 4],
+        n: usize,
+        use_poseidon2: bool,
+    ) -> [F; 4] {
         let mut current = initial_state;
-        for _ in 0..n {
-            current = hash_n_to_hash_no_pad::<F, PoseidonPermutation<F>>(&current).elements;
+
+        if use_poseidon2 {
+            for _ in 0..n {
+                current = hash_n_to_hash_no_pad::<F, Poseidon2Permutation<F>>(&current).elements;
+            }
+        } else {
+            for _ in 0..n {
+                current = hash_n_to_hash_no_pad::<F, PoseidonPermutation<F>>(&current).elements;
+            }
         }
         current
     }

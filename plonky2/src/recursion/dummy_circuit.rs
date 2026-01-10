@@ -113,6 +113,7 @@ pub fn dummy_circuit<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, c
     }
 
     let circuit = builder.build::<C>();
+
     assert_eq!(&circuit.common, common_data);
     circuit
 }

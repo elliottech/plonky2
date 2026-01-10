@@ -52,6 +52,11 @@ plonky2_util = { version = "1.0.0", path = "../util", default-features = false }
 # cuda accelerator wrapper
 zeknox = { workspace = true }
 
+# Plonky3 dependencies for Poseidon2
+p3-poseidon2 = { git = "https://github.com/Plonky3/Plonky3.git", rev = "eeb4e37b20127c4daa871b2bad0df30a7c7380db" }
+p3-goldilocks = { git = "https://github.com/Plonky3/Plonky3.git", rev = "eeb4e37b20127c4daa871b2bad0df30a7c7380db" }
+p3-field = { git = "https://github.com/Plonky3/Plonky3.git", rev = "eeb4e37b20127c4daa871b2bad0df30a7c7380db" }
+p3-symmetric = { git = "https://github.com/Plonky3/Plonky3.git", rev = "eeb4e37b20127c4daa871b2bad0df30a7c7380db" }
 
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
 getrandom = { version = "0.2", default-features = false, features = ["js"] }

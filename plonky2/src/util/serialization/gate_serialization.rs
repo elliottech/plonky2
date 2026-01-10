@@ -110,12 +110,14 @@ pub mod default {
     use crate::gates::multiplication_extension::MulExtensionGate;
     use crate::gates::noop::NoopGate;
     use crate::gates::poseidon::PoseidonGate;
+    use crate::gates::poseidon2::Poseidon2Gate;
     use crate::gates::poseidon_mds::PoseidonMdsGate;
     use crate::gates::public_input::PublicInputGate;
     use crate::gates::random_access::RandomAccessGate;
     use crate::gates::reducing::ReducingGate;
     use crate::gates::reducing_extension::ReducingExtensionGate;
     use crate::hash::hash_types::RichField;
+    use crate::hash::poseidon2::hash::Poseidon2;
     use crate::util::serialization::GateSerializer;
     /// A gate serializer that can be used to serialize all default gates supported
     /// by the `plonky2` library.
@@ -128,7 +130,9 @@ pub mod default {
     /// the `GateSerializer` trait. This can be easily done through the `impl_gate_serializer` macro.
     #[derive(Debug)]
     pub struct DefaultGateSerializer;
-    impl<F: RichField + Extendable<D>, const D: usize> GateSerializer<F, D> for DefaultGateSerializer {
+    impl<F: RichField + Extendable<D> + Poseidon2, const D: usize> GateSerializer<F, D>
+        for DefaultGateSerializer
+    {
         impl_gate_serializer! {
             DefaultGateSerializer,
             ArithmeticGate,
@@ -146,6 +150,7 @@ pub mod default {
             NoopGate,
             PoseidonMdsGate<F, D>,
             PoseidonGate<F, D>,
+            Poseidon2Gate<F, D>,
             PublicInputGate,
             RandomAccessGate<F, D>,
             ReducingExtensionGate<D>,

@@ -349,28 +349,35 @@ mod tests {
 
     use anyhow::Result;
     use hashbrown::HashMap;
+    use plonky2_field::goldilocks_field::GoldilocksField;
 
     use super::*;
     use crate::field::types::Sample;
     use crate::gates::noop::NoopGate;
     use crate::iop::witness::{PartialWitness, WitnessWrite};
     use crate::plonk::circuit_data::CircuitConfig;
-    use crate::plonk::config::PoseidonGoldilocksConfig;
+    use crate::plonk::config::{Poseidon2GoldilocksConfig, PoseidonGoldilocksConfig};
     use crate::recursion::dummy_circuit::{dummy_circuit, dummy_proof};
 
     #[test]
     fn test_conditional_recursive_verifier() -> Result<()> {
         init_logger();
-        const D: usize = 2;
-        type C = PoseidonGoldilocksConfig;
-        type F = <C as GenericConfig<D>>::F;
+        conditional_recursive_verifier::<PoseidonGoldilocksConfig>()?;
+        conditional_recursive_verifier::<Poseidon2GoldilocksConfig>()
+    }
+
+    fn conditional_recursive_verifier<C: GenericConfig<2, F = GoldilocksField> + 'static>(
+    ) -> Result<()>
+    where
+        C::Hasher: AlgebraicHasher<GoldilocksField>,
+    {
         let config = CircuitConfig::standard_recursion_config();
 
         // Generate proof.
-        let mut builder = CircuitBuilder::<F, D>::new(config.clone());
+        let mut builder = CircuitBuilder::<C::F, 2>::new(config.clone());
         let mut pw = PartialWitness::new();
         let t = builder.add_virtual_target();
-        pw.set_target(t, F::rand())?;
+        pw.set_target(t, C::F::rand())?;
         builder.register_public_input(t);
         let _t2 = builder.square(t);
         for _ in 0..64 {
@@ -385,19 +392,19 @@ mod tests {
         let dummy_proof = dummy_proof(&dummy_data, HashMap::new())?;
 
         // Conditionally verify the two proofs.
-        let mut builder = CircuitBuilder::<F, D>::new(config);
+        let mut builder = CircuitBuilder::<C::F, 2>::new(config);
         let mut pw = PartialWitness::new();
         let pt = builder.add_virtual_proof_with_pis(&data.common);
         pw.set_proof_with_pis_target(&pt, &proof)?;
         let dummy_pt = builder.add_virtual_proof_with_pis(&data.common);
-        pw.set_proof_with_pis_target::<C, D>(&dummy_pt, &dummy_proof)?;
+        pw.set_proof_with_pis_target::<C, 2>(&dummy_pt, &dummy_proof)?;
         let inner_data =
             builder.add_virtual_verifier_data(data.common.config.fri_config.cap_height);
         pw.set_verifier_data_target(&inner_data, &data.verifier_only)?;
         let dummy_inner_data =
             builder.add_virtual_verifier_data(data.common.config.fri_config.cap_height);
         pw.set_verifier_data_target(&dummy_inner_data, &dummy_data.verifier_only)?;
-        let b = builder.constant_bool(F::rand().0 % 2 == 0);
+        let b = builder.constant_bool(C::F::rand().0 % 2 == 0);
         builder.conditionally_verify_proof::<C>(
             b,
             &pt,

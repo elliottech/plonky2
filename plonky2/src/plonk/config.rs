@@ -20,6 +20,7 @@ use crate::hash::hash_types::{HashOut, RichField};
 use crate::hash::hashing::PlonkyPermutation;
 use crate::hash::keccak::KeccakHash;
 use crate::hash::poseidon::PoseidonHash;
+use crate::hash::poseidon2::hash::Poseidon2Hash;
 use crate::iop::target::{BoolTarget, Target};
 use crate::plonk::circuit_builder::CircuitBuilder;
 
@@ -61,7 +62,7 @@ pub trait Hasher<F: RichField>: Sized + Copy + Debug + Eq + PartialEq {
     fn hash_pad(input: &[F]) -> Self::Hash {
         let mut padded_input = input.to_vec();
         padded_input.push(F::ONE);
-        while (padded_input.len() + 1) % Self::Permutation::RATE != 0 {
+        while !(padded_input.len() + 1).is_multiple_of(Self::Permutation::RATE) {
             padded_input.push(F::ZERO);
         }
         padded_input.push(F::ONE);
@@ -123,6 +124,16 @@ impl GenericConfig<2> for PoseidonGoldilocksConfig {
     type FE = QuadraticExtension<Self::F>;
     type Hasher = PoseidonHash;
     type InnerHasher = PoseidonHash;
+}
+
+/// Configuration using Poseidon over the Goldilocks field.
+#[derive(Debug, Copy, Clone, Default, Eq, PartialEq, Serialize)]
+pub struct Poseidon2GoldilocksConfig;
+impl GenericConfig<2> for Poseidon2GoldilocksConfig {
+    type F = GoldilocksField;
+    type FE = QuadraticExtension<Self::F>;
+    type Hasher = Poseidon2Hash;
+    type InnerHasher = Poseidon2Hash;
 }
 
 /// Configuration using truncated Keccak over the Goldilocks field.

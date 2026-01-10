@@ -205,6 +205,7 @@ mod tests {
     use anyhow::Result;
     use itertools::Itertools;
     use log::{info, Level};
+    use plonky2_field::goldilocks_field::GoldilocksField;
 
     use super::*;
     use crate::fri::reduction_strategies::FriReductionStrategy;
@@ -214,7 +215,9 @@ mod tests {
     use crate::gates::noop::NoopGate;
     use crate::iop::witness::{PartialWitness, WitnessWrite};
     use crate::plonk::circuit_data::{CircuitConfig, VerifierOnlyCircuitData};
-    use crate::plonk::config::{KeccakGoldilocksConfig, PoseidonGoldilocksConfig};
+    use crate::plonk::config::{
+        KeccakGoldilocksConfig, Poseidon2GoldilocksConfig, PoseidonGoldilocksConfig,
+    };
     use crate::plonk::proof::{CompressedProofWithPublicInputs, ProofWithPublicInputs};
     use crate::plonk::prover::prove;
     use crate::util::timing::TimingTree;
@@ -223,14 +226,27 @@ mod tests {
     fn test_recursive_verifier() -> Result<()> {
         init_logger();
         const D: usize = 2;
-        type C = PoseidonGoldilocksConfig;
-        type F = <C as GenericConfig<D>>::F;
-        let config = CircuitConfig::standard_recursion_zk_config();
+        {
+            type C = PoseidonGoldilocksConfig;
+            type F = <C as GenericConfig<D>>::F;
+            let config = CircuitConfig::standard_recursion_zk_config();
 
-        let (proof, vd, common_data) = dummy_proof::<F, C, D>(&config, 4_000)?;
-        let (proof, vd, common_data) =
-            recursive_proof::<F, C, C, D>(proof, vd, common_data, &config, None, true, true)?;
-        test_serialization(&proof, &vd, &common_data)?;
+            let (proof, vd, common_data) = dummy_proof::<F, C, D>(&config, 4_000)?;
+            let (proof, vd, common_data) =
+                recursive_proof::<F, C, C, D>(proof, vd, common_data, &config, None, true, true)?;
+            test_serialization(&proof, &vd, &common_data)?;
+        }
+
+        {
+            type C = Poseidon2GoldilocksConfig;
+            type F = <C as GenericConfig<D>>::F;
+            let config = CircuitConfig::standard_recursion_zk_config();
+
+            let (proof, vd, common_data) = dummy_proof::<F, C, D>(&config, 4_000)?;
+            let (proof, vd, common_data) =
+                recursive_proof::<F, C, C, D>(proof, vd, common_data, &config, None, true, true)?;
+            test_serialization(&proof, &vd, &common_data)?;
+        }
 
         Ok(())
     }
@@ -239,14 +255,26 @@ mod tests {
     fn test_recursive_verifier_one_lookup() -> Result<()> {
         init_logger();
         const D: usize = 2;
-        type C = PoseidonGoldilocksConfig;
-        type F = <C as GenericConfig<D>>::F;
-        let config = CircuitConfig::standard_recursion_zk_config();
+        {
+            type C = PoseidonGoldilocksConfig;
+            type F = <C as GenericConfig<D>>::F;
+            let config = CircuitConfig::standard_recursion_zk_config();
 
-        let (proof, vd, common_data) = dummy_lookup_proof::<F, C, D>(&config, 10)?;
-        let (proof, vd, common_data) =
-            recursive_proof::<F, C, C, D>(proof, vd, common_data, &config, None, true, true)?;
-        test_serialization(&proof, &vd, &common_data)?;
+            let (proof, vd, common_data) = dummy_lookup_proof::<F, C, D>(&config, 10)?;
+            let (proof, vd, common_data) =
+                recursive_proof::<F, C, C, D>(proof, vd, common_data, &config, None, true, true)?;
+            test_serialization(&proof, &vd, &common_data)?;
+        }
+        {
+            type C = Poseidon2GoldilocksConfig;
+            type F = <C as GenericConfig<D>>::F;
+            let config = CircuitConfig::standard_recursion_zk_config();
+
+            let (proof, vd, common_data) = dummy_lookup_proof::<F, C, D>(&config, 10)?;
+            let (proof, vd, common_data) =
+                recursive_proof::<F, C, C, D>(proof, vd, common_data, &config, None, true, true)?;
+            test_serialization(&proof, &vd, &common_data)?;
+        }
 
         Ok(())
     }
@@ -255,15 +283,26 @@ mod tests {
     fn test_recursive_verifier_two_luts() -> Result<()> {
         init_logger();
         const D: usize = 2;
-        type C = PoseidonGoldilocksConfig;
-        type F = <C as GenericConfig<D>>::F;
-        let config = CircuitConfig::standard_recursion_config();
+        {
+            type C = PoseidonGoldilocksConfig;
+            type F = <C as GenericConfig<D>>::F;
+            let config = CircuitConfig::standard_recursion_config();
 
-        let (proof, vd, common_data) = dummy_two_luts_proof::<F, C, D>(&config)?;
-        let (proof, vd, common_data) =
-            recursive_proof::<F, C, C, D>(proof, vd, common_data, &config, None, true, true)?;
-        test_serialization(&proof, &vd, &common_data)?;
+            let (proof, vd, common_data) = dummy_two_luts_proof::<F, C, D>(&config)?;
+            let (proof, vd, common_data) =
+                recursive_proof::<F, C, C, D>(proof, vd, common_data, &config, None, true, true)?;
+            test_serialization(&proof, &vd, &common_data)?;
+        }
+        {
+            type C = Poseidon2GoldilocksConfig;
+            type F = <C as GenericConfig<D>>::F;
+            let config = CircuitConfig::standard_recursion_config();
 
+            let (proof, vd, common_data) = dummy_two_luts_proof::<F, C, D>(&config)?;
+            let (proof, vd, common_data) =
+                recursive_proof::<F, C, C, D>(proof, vd, common_data, &config, None, true, true)?;
+            test_serialization(&proof, &vd, &common_data)?;
+        }
         Ok(())
     }
 
@@ -271,15 +310,26 @@ mod tests {
     fn test_recursive_verifier_too_many_rows() -> Result<()> {
         init_logger();
         const D: usize = 2;
-        type C = PoseidonGoldilocksConfig;
-        type F = <C as GenericConfig<D>>::F;
-        let config = CircuitConfig::standard_recursion_config();
+        {
+            type C = PoseidonGoldilocksConfig;
+            type F = <C as GenericConfig<D>>::F;
+            let config = CircuitConfig::standard_recursion_config();
 
-        let (proof, vd, common_data) = dummy_too_many_rows_proof::<F, C, D>(&config)?;
-        let (proof, vd, common_data) =
-            recursive_proof::<F, C, C, D>(proof, vd, common_data, &config, None, true, true)?;
-        test_serialization(&proof, &vd, &common_data)?;
+            let (proof, vd, common_data) = dummy_too_many_rows_proof::<F, C, D>(&config)?;
+            let (proof, vd, common_data) =
+                recursive_proof::<F, C, C, D>(proof, vd, common_data, &config, None, true, true)?;
+            test_serialization(&proof, &vd, &common_data)?;
+        }
+        {
+            type C = Poseidon2GoldilocksConfig;
+            type F = <C as GenericConfig<D>>::F;
+            let config = CircuitConfig::standard_recursion_config();
 
+            let (proof, vd, common_data) = dummy_too_many_rows_proof::<F, C, D>(&config)?;
+            let (proof, vd, common_data) =
+                recursive_proof::<F, C, C, D>(proof, vd, common_data, &config, None, true, true)?;
+            test_serialization(&proof, &vd, &common_data)?;
+        }
         Ok(())
     }
 
@@ -287,27 +337,65 @@ mod tests {
     fn test_recursive_recursive_verifier() -> Result<()> {
         init_logger();
         const D: usize = 2;
-        type C = PoseidonGoldilocksConfig;
-        type F = <C as GenericConfig<D>>::F;
+        {
+            type C = PoseidonGoldilocksConfig;
+            type F = <C as GenericConfig<D>>::F;
 
-        let config = CircuitConfig::standard_recursion_config();
+            let config = CircuitConfig::standard_recursion_config();
 
-        // Start with a degree 2^14 proof
-        let (proof, vd, common_data) = dummy_proof::<F, C, D>(&config, 16_000)?;
-        assert_eq!(common_data.degree_bits(), 14);
+            // Start with a degree 2^14 proof
+            let (proof, vd, common_data) = dummy_proof::<F, C, D>(&config, 16_000)?;
+            assert_eq!(common_data.degree_bits(), 14);
 
-        // Shrink it to 2^13.
-        let (proof, vd, common_data) =
-            recursive_proof::<F, C, C, D>(proof, vd, common_data, &config, Some(13), false, false)?;
-        assert_eq!(common_data.degree_bits(), 13);
+            // Shrink it to 2^13.
+            let (proof, vd, common_data) = recursive_proof::<F, C, C, D>(
+                proof,
+                vd,
+                common_data,
+                &config,
+                Some(13),
+                false,
+                false,
+            )?;
+            assert_eq!(common_data.degree_bits(), 13);
 
-        // Shrink it to 2^12.
-        let (proof, vd, common_data) =
-            recursive_proof::<F, C, C, D>(proof, vd, common_data, &config, None, true, true)?;
-        assert_eq!(common_data.degree_bits(), 12);
+            // Shrink it to 2^12.
+            let (proof, vd, common_data) =
+                recursive_proof::<F, C, C, D>(proof, vd, common_data, &config, None, true, true)?;
+            assert_eq!(common_data.degree_bits(), 12);
 
-        test_serialization(&proof, &vd, &common_data)?;
+            test_serialization(&proof, &vd, &common_data)?;
+        }
 
+        {
+            type C = Poseidon2GoldilocksConfig;
+            type F = <C as GenericConfig<D>>::F;
+
+            let config = CircuitConfig::standard_recursion_config();
+
+            // Start with a degree 2^14 proof
+            let (proof, vd, common_data) = dummy_proof::<F, C, D>(&config, 16_000)?;
+            assert_eq!(common_data.degree_bits(), 14);
+
+            // Shrink it to 2^13.
+            let (proof, vd, common_data) = recursive_proof::<F, C, C, D>(
+                proof,
+                vd,
+                common_data,
+                &config,
+                Some(13),
+                false,
+                false,
+            )?;
+            assert_eq!(common_data.degree_bits(), 13);
+
+            // Shrink it to 2^12.
+            let (proof, vd, common_data) =
+                recursive_proof::<F, C, C, D>(proof, vd, common_data, &config, None, true, true)?;
+            assert_eq!(common_data.degree_bits(), 12);
+
+            test_serialization(&proof, &vd, &common_data)?;
+        }
         Ok(())
     }
 
@@ -316,20 +404,26 @@ mod tests {
     #[test]
     #[ignore]
     fn test_size_optimized_recursion() -> Result<()> {
+        size_optimized_recursion::<PoseidonGoldilocksConfig>()?;
+        size_optimized_recursion::<Poseidon2GoldilocksConfig>()
+    }
+
+    fn size_optimized_recursion<C: GenericConfig<2, F = GoldilocksField>>() -> Result<()>
+    where
+        C::Hasher: AlgebraicHasher<GoldilocksField>,
+    {
         init_logger();
         const D: usize = 2;
-        type C = PoseidonGoldilocksConfig;
         type KC = KeccakGoldilocksConfig;
-        type F = <C as GenericConfig<D>>::F;
 
         let standard_config = CircuitConfig::standard_recursion_config();
 
         // An initial dummy proof.
-        let (proof, vd, common_data) = dummy_proof::<F, C, D>(&standard_config, 4_000)?;
+        let (proof, vd, common_data) = dummy_proof::<C::F, C, D>(&standard_config, 4_000)?;
         assert_eq!(common_data.degree_bits(), 12);
 
         // A standard recursive proof.
-        let (proof, vd, common_data) = recursive_proof::<F, C, C, D>(
+        let (proof, vd, common_data) = recursive_proof::<C::F, C, C, D>(
             proof,
             vd,
             common_data,
@@ -350,7 +444,7 @@ mod tests {
             },
             ..standard_config
         };
-        let (proof, vd, common_data) = recursive_proof::<F, C, C, D>(
+        let (proof, vd, common_data) = recursive_proof::<C::F, C, C, D>(
             proof,
             vd,
             common_data,
@@ -373,7 +467,7 @@ mod tests {
             },
             ..high_rate_config
         };
-        let (proof, vd, common_data) = recursive_proof::<F, KC, C, D>(
+        let (proof, vd, common_data) = recursive_proof::<C::F, KC, C, D>(
             proof,
             vd,
             common_data,
@@ -393,21 +487,66 @@ mod tests {
     fn test_recursive_verifier_multi_hash() -> Result<()> {
         init_logger();
         const D: usize = 2;
-        type PC = PoseidonGoldilocksConfig;
         type KC = KeccakGoldilocksConfig;
-        type F = <PC as GenericConfig<D>>::F;
 
-        let config = CircuitConfig::standard_recursion_config();
-        let (proof, vd, common_data) = dummy_proof::<F, PC, D>(&config, 4_000)?;
+        {
+            type PC = PoseidonGoldilocksConfig;
+            type F = <PC as GenericConfig<D>>::F;
 
-        let (proof, vd, common_data) =
-            recursive_proof::<F, PC, PC, D>(proof, vd, common_data, &config, None, false, false)?;
-        test_serialization(&proof, &vd, &common_data)?;
+            let config = CircuitConfig::standard_recursion_config();
+            let (proof, vd, common_data) = dummy_proof::<F, PC, D>(&config, 4_000)?;
 
-        let (proof, vd, common_data) =
-            recursive_proof::<F, KC, PC, D>(proof, vd, common_data, &config, None, false, false)?;
-        test_serialization(&proof, &vd, &common_data)?;
+            let (proof, vd, common_data) = recursive_proof::<F, PC, PC, D>(
+                proof,
+                vd,
+                common_data,
+                &config,
+                None,
+                false,
+                false,
+            )?;
+            test_serialization(&proof, &vd, &common_data)?;
 
+            let (proof, vd, common_data) = recursive_proof::<F, KC, PC, D>(
+                proof,
+                vd,
+                common_data,
+                &config,
+                None,
+                false,
+                false,
+            )?;
+            test_serialization(&proof, &vd, &common_data)?;
+        }
+        {
+            type PC = Poseidon2GoldilocksConfig;
+            type F = <PC as GenericConfig<D>>::F;
+
+            let config = CircuitConfig::standard_recursion_config();
+            let (proof, vd, common_data) = dummy_proof::<F, PC, D>(&config, 4_000)?;
+
+            let (proof, vd, common_data) = recursive_proof::<F, PC, PC, D>(
+                proof,
+                vd,
+                common_data,
+                &config,
+                None,
+                false,
+                false,
+            )?;
+            test_serialization(&proof, &vd, &common_data)?;
+
+            let (proof, vd, common_data) = recursive_proof::<F, KC, PC, D>(
+                proof,
+                vd,
+                common_data,
+                &config,
+                None,
+                false,
+                false,
+            )?;
+            test_serialization(&proof, &vd, &common_data)?;
+        }
         Ok(())
     }
 

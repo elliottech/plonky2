@@ -19,8 +19,6 @@ fn main() -> Result<()> {
         .filter_level(log::LevelFilter::Debug)
         .init();
     const D: usize = 2;
-    type C = PoseidonGoldilocksConfig;
-    type F = <C as GenericConfig<D>>::F;
 
     let config = CircuitConfig::standard_recursion_config();
     let mut builder = CircuitBuilder::<F, D>::new(config);
@@ -62,6 +60,7 @@ fn main() -> Result<()> {
     builder.register_public_input(cur_target);
 
     // Provide initial values.
+    let timer1 = Instant::now();
     let mut pw = PartialWitness::new();
     pw.set_target(initial_a, F::ZERO)?;
     pw.set_target(initial_b, F::ONE)?;

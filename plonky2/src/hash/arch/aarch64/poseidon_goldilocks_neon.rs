@@ -58,7 +58,7 @@ const_assert!(check_mds_matrix());
 
 /// Addition modulo ORDER accounting for wraparound. Correct only when a + b < 2**64 + ORDER.
 #[inline(always)]
-unsafe fn add_with_wraparound(a: u64, b: u64) -> u64 {
+pub unsafe fn add_with_wraparound(a: u64, b: u64) -> u64 {
     let res: u64;
     let adj: u64;
     asm!(
@@ -872,12 +872,12 @@ unsafe fn partial_rounds(
 */
 
 #[inline(always)]
-fn unwrap_state(state: [GoldilocksField; 12]) -> [u64; 12] {
+pub(crate) fn unwrap_state(state: [GoldilocksField; 12]) -> [u64; 12] {
     state.map(|s| s.0)
 }
 
 #[inline(always)]
-fn wrap_state(state: [u64; 12]) -> [GoldilocksField; 12] {
+pub(crate) fn wrap_state(state: [u64; 12]) -> [GoldilocksField; 12] {
     state.map(GoldilocksField)
 }
 
@@ -914,4 +914,29 @@ pub unsafe fn mds_layer(state: &[GoldilocksField; WIDTH]) -> [GoldilocksField; W
     let state = unwrap_state(*state);
     let state = mds_layer_full(state);
     wrap_state(state)
+}
+
+#[inline(always)]
+#[unroll::unroll_for_loops]
+pub unsafe fn vector_add(a: &[u64; WIDTH], b: &[u64; WIDTH]) -> [u64; WIDTH] {
+    let mut res = [0u64; WIDTH];
+    // Process 2 elements at a time using NEON
+    for i in (0..WIDTH).step_by(2) {
+        let a_vec = vld1q_u64(a[i..].as_ptr());
+        let b_vec = vld1q_u64(b[i..].as_ptr());
+
+        // Add the round constants
+        let sum = vaddq_u64(a_vec, b_vec);
+
+        // Check for overflow (if sum < state_vec, we wrapped around)
+        let overflow_mask = vcltq_u64(sum, a_vec);
+
+        // Add EPSILON (0xffffffff) where overflow occurred
+        let epsilon = vdupq_n_u64(0xffffffff);
+        let adjustment = vandq_u64(overflow_mask, epsilon);
+        let result = vaddq_u64(sum, adjustment);
+
+        vst1q_u64(res[i..].as_mut_ptr(), result);
+    }
+    res
 }
