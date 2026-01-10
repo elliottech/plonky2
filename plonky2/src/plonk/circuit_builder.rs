@@ -1225,6 +1225,22 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
         let max_fft_points = 1 << (degree_bits + max(rate_bits, log2_ceil(quotient_degree_factor)));
         let fft_root_table = fft_root_table(max_fft_points);
 
+        // Initialize GPU twiddle factors for all sizes we'll use
+        #[cfg(feature = "cuda")]
+        {
+            if F::CUDA_SUPPORT {
+                zeknox::clear_cuda_errors_rs();
+                // Initialize twiddle factors for degree and LDE sizes
+                // degree_bits: the base degree
+                // degree_bits + rate_bits: the LDE size used in from_coeffs
+                // We need to initialize from 0 to cover all potential sizes
+                let max_log_size = degree_bits + max(rate_bits, log2_ceil(quotient_degree_factor));
+                for i in 0..=max_log_size {
+                    zeknox::init_twiddle_factors_rs(0, i);
+                }
+            }
+        }
+
         // This part of the code on GPU is buggy. So we use CPU for computation.
         // It does not impact performance as this is only done once during setup.
         let constants_sigmas_commitment = if commit_to_sigma {
