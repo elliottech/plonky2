@@ -8,9 +8,12 @@ use p3_symmetric::Permutation;
 use plonky2::field::goldilocks_field::GoldilocksField;
 use plonky2::field::types::Sample;
 use plonky2::hash::hash_types::{BytesHash, RichField};
+use plonky2::hash::hashing::hash_n_to_m_no_pad;
 use plonky2::hash::keccak::KeccakHash;
-use plonky2::hash::poseidon::{Poseidon, SPONGE_WIDTH};
-use plonky2::hash::poseidon2::hash::Poseidon2;
+use plonky2::hash::poseidon::{
+    Poseidon, PoseidonHash, PoseidonPermutation, SPONGE_RATE, SPONGE_WIDTH,
+};
+use plonky2::hash::poseidon2::hash::{Poseidon2, Poseidon2Hash, Poseidon2Permutation};
 use plonky2::plonk::config::Hasher;
 use tynm::type_name;
 
@@ -48,6 +51,54 @@ pub(crate) fn bench_poseidon2<F: Poseidon2>(c: &mut Criterion) {
             )
         },
     );
+}
+
+pub(crate) fn bench_poseidon_n_to_4(c: &mut Criterion) {
+    c.bench_function("poseidon 8-to-4", |b| {
+        // This calls PoseidonHash::hash_8_to_4, whose underlying permutation state width is 12.
+        b.iter_batched(
+            || GoldilocksField::rand_array::<SPONGE_RATE>(),
+            |input| PoseidonHash::hash_8_to_4(input),
+            BatchSize::SmallInput,
+        )
+    });
+
+    c.bench_function("poseidon 12-to-4", |b| {
+        // Width-12 sponge path.
+        b.iter_batched(
+            || GoldilocksField::rand_array::<SPONGE_WIDTH>(),
+            |input| {
+                hash_n_to_m_no_pad::<GoldilocksField, PoseidonPermutation<GoldilocksField>>(
+                    &input, 4,
+                )
+            },
+            BatchSize::SmallInput,
+        )
+    });
+}
+
+pub(crate) fn bench_poseidon2_n_to_4(c: &mut Criterion) {
+    c.bench_function("poseidon2 8-to-4", |b| {
+        // True width-8 Poseidon2 permutation path (single permutation, truncate to 4).
+        b.iter_batched(
+            || GoldilocksField::rand_array::<SPONGE_RATE>(),
+            |input| Poseidon2Hash::hash_8_to_4(input),
+            BatchSize::SmallInput,
+        )
+    });
+
+    c.bench_function("poseidon2 12-to-4", |b| {
+        // Width-12 sponge path.
+        b.iter_batched(
+            || GoldilocksField::rand_array::<SPONGE_WIDTH>(),
+            |input| {
+                hash_n_to_m_no_pad::<GoldilocksField, Poseidon2Permutation<GoldilocksField>>(
+                    &input, 4,
+                )
+            },
+            BatchSize::SmallInput,
+        )
+    });
 }
 
 pub(crate) fn bench_p3_poseidon2(c: &mut Criterion) {
@@ -111,7 +162,9 @@ pub(crate) fn bench_p3_poseidon2(c: &mut Criterion) {
 
 fn criterion_benchmark(c: &mut Criterion) {
     bench_poseidon::<GoldilocksField>(c);
+    bench_poseidon_n_to_4(c);
     bench_poseidon2::<GoldilocksField>(c);
+    bench_poseidon2_n_to_4(c);
     bench_p3_poseidon2(c);
     bench_keccak::<GoldilocksField>(c);
 }
