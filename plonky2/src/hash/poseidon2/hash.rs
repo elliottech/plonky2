@@ -7,6 +7,7 @@ use crate::field::extension::{Extendable, FieldExtension};
 use crate::field::goldilocks_field::GoldilocksField as F;
 use crate::field::types::{Field, PrimeField64};
 use crate::gates::poseidon2::Poseidon2Gate;
+use crate::gates::poseidon2_8::poseidon2_compress_8_to_4_swapped;
 use crate::hash::hash_types::{HashOut, HashOutTarget, RichField};
 use crate::hash::hashing::{hash_n_to_hash_no_pad, PlonkyPermutation};
 use crate::iop::ext_target::ExtensionTarget;
@@ -499,8 +500,7 @@ where
 fn sbox_8_circuit<P, const D: usize>(
     builder: &mut CircuitBuilder<P, D>,
     state: &mut [Target; WIDTH_8],
-)
-where
+) where
     P: RichField + Extendable<D>,
 {
     for item in state.iter_mut() {
@@ -517,7 +517,10 @@ fn add_rc_8_circuit<P, const D: usize>(
     P: RichField + Extendable<D>,
 {
     for i in 0..WIDTH_8 {
-        state[i] = builder.add_const(state[i], P::from_canonical_u64(EXTERNAL_CONSTANTS_8[round][i]));
+        state[i] = builder.add_const(
+            state[i],
+            P::from_canonical_u64(EXTERNAL_CONSTANTS_8[round][i]),
+        );
     }
 }
 
@@ -837,7 +840,7 @@ impl<F: RichField + Poseidon2> AlgebraicHasher<F> for Poseidon2Hash {
     where
         F: RichField + Extendable<D>,
     {
-        poseidon2_compress_8_to_4_circuit(builder, left, right, swap)
+        poseidon2_compress_8_to_4_swapped(builder, left, right, swap)
     }
 }
 
@@ -990,5 +993,44 @@ mod test {
 
         let proof = circuit.prove(pw).unwrap();
         circuit.verify(proof.clone())
+    }
+
+    #[test]
+    fn test_poseidon2_two_to_one_matches_swapped_false_circuit() -> Result<()> {
+        let mut builder = CircuitBuilder::<F, 2>::new(CircuitConfig::standard_recursion_config());
+        let left_t = builder.add_virtual_hash();
+        let right_t = builder.add_virtual_hash();
+        let expected_t = builder.add_virtual_hash();
+
+        let got_t = <Poseidon2Hash as AlgebraicHasher<F>>::two_to_one_swapped(
+            left_t,
+            right_t,
+            builder._false(),
+            &mut builder,
+        );
+        builder.connect_hashes(got_t, expected_t);
+
+        let circuit = builder.build::<PoseidonGoldilocksConfig>();
+        let mut rng = thread_rng();
+
+        for _ in 0..32 {
+            let left = HashOut::<F> {
+                elements: array::from_fn(|_| F::from_noncanonical_u64(rng.next_u64())),
+            };
+            let right = HashOut::<F> {
+                elements: array::from_fn(|_| F::from_noncanonical_u64(rng.next_u64())),
+            };
+            let expected = <Poseidon2Hash as Hasher<F>>::two_to_one(left, right);
+
+            let mut pw = PartialWitness::new();
+            pw.set_hash_target(left_t, left)?;
+            pw.set_hash_target(right_t, right)?;
+            pw.set_hash_target(expected_t, expected)?;
+
+            let proof = circuit.prove(pw)?;
+            circuit.verify(proof)?;
+        }
+
+        Ok(())
     }
 }

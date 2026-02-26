@@ -112,7 +112,9 @@ pub trait AlgebraicHasher<F: RichField>: Hasher<F, Hash = HashOut<F>> {
         perm_inputs.set_from_iter(core::iter::repeat(zero), 2 * NUM_HASH_OUT_ELTS);
         let perm_outs = Self::permute_swapped(perm_inputs, swap, builder);
         HashOutTarget {
-            elements: perm_outs.squeeze()[0..NUM_HASH_OUT_ELTS].try_into().unwrap(),
+            elements: perm_outs.squeeze()[0..NUM_HASH_OUT_ELTS]
+                .try_into()
+                .unwrap(),
         }
     }
 }
