@@ -9,6 +9,7 @@ use plonky2_field::packed::PackedField;
 use unroll::unroll_for_loops;
 
 use crate::field::extension::{Extendable, FieldExtension};
+use crate::field::goldilocks_field::GoldilocksField as F;
 use crate::field::types::{Field, PrimeField64};
 use crate::gates::gate::Gate;
 use crate::gates::poseidon::PoseidonGate;
@@ -886,6 +887,20 @@ impl<F: RichField> Hasher<F> for PoseidonHash {
     }
 }
 
+impl PoseidonHash {
+    #[inline]
+    pub fn hash_8_to_4(input: [F; SPONGE_RATE]) -> HashOut<F> {
+        // This is an 8-input / 4-output API over the existing Poseidon permutation in this crate.
+        // The underlying permutation state width is SPONGE_WIDTH (= 12), not 8.
+        let mut state = [F::ZERO; SPONGE_WIDTH];
+        state[..SPONGE_RATE].copy_from_slice(&input);
+        let state = F::poseidon(state);
+        HashOut {
+            elements: state[..4].try_into().unwrap(),
+        }
+    }
+}
+
 impl<F: RichField> AlgebraicHasher<F> for PoseidonHash {
     type AlgebraicPermutation = PoseidonPermutation<Target>;
 
@@ -953,6 +968,40 @@ pub(crate) mod test_helpers {
         let output_naive = F::poseidon_naive(input);
         for i in 0..SPONGE_WIDTH {
             assert_eq!(output[i], output_naive[i]);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use core::array;
+
+    use num::{BigUint, One};
+    use rand::{thread_rng, RngCore};
+
+    use super::*;
+    use crate::hash::hashing::hash_n_to_m_no_pad;
+
+    #[test]
+    fn test_poseidon_hash_8_to_4_matches_sponge() {
+        let mut rng = thread_rng();
+        for _ in 0..128 {
+            let input = array::from_fn(|_| F::from_noncanonical_u64(rng.next_u64()));
+            let got = PoseidonHash::hash_8_to_4(input);
+            let expected = hash_n_to_m_no_pad::<F, PoseidonPermutation<F>>(&input, 4);
+            assert_eq!(got.elements, expected.as_slice());
+        }
+    }
+
+    #[test]
+    fn test_poseidon_hash_8_to_4_edge_cases() {
+        let max = F::from_noncanonical_biguint(F::order() - BigUint::one());
+        let cases: [[F; 8]; 3] = [[F::ZERO; 8], [F::ONE; 8], [max; 8]];
+
+        for input in cases {
+            let got = PoseidonHash::hash_8_to_4(input);
+            let expected = hash_n_to_m_no_pad::<F, PoseidonPermutation<F>>(&input, 4);
+            assert_eq!(got.elements, expected.as_slice());
         }
     }
 }

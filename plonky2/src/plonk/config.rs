@@ -16,7 +16,7 @@ use serde::Serialize;
 use crate::field::extension::quadratic::QuadraticExtension;
 use crate::field::extension::{Extendable, FieldExtension};
 use crate::field::goldilocks_field::GoldilocksField;
-use crate::hash::hash_types::{HashOut, RichField};
+use crate::hash::hash_types::{HashOut, HashOutTarget, RichField, NUM_HASH_OUT_ELTS};
 use crate::hash::hashing::PlonkyPermutation;
 use crate::hash::keccak::KeccakHash;
 use crate::hash::poseidon::PoseidonHash;
@@ -90,6 +90,33 @@ pub trait AlgebraicHasher<F: RichField>: Hasher<F, Hash = HashOut<F>> {
     ) -> Self::AlgebraicPermutation
     where
         F: RichField + Extendable<D>;
+
+    /// Conditionally swap left/right hash inputs, then hash them into one hash output.
+    ///
+    /// By default this is implemented via `permute_swapped` over the hasher permutation.
+    /// Hashers with custom compression behavior (different from generic permutation squeezing)
+    /// can override this.
+    fn two_to_one_swapped<const D: usize>(
+        left: HashOutTarget,
+        right: HashOutTarget,
+        swap: BoolTarget,
+        builder: &mut CircuitBuilder<F, D>,
+    ) -> HashOutTarget
+    where
+        F: RichField + Extendable<D>,
+    {
+        let zero = builder.zero();
+        let mut perm_inputs = Self::AlgebraicPermutation::default();
+        perm_inputs.set_from_slice(&left.elements, 0);
+        perm_inputs.set_from_slice(&right.elements, NUM_HASH_OUT_ELTS);
+        perm_inputs.set_from_iter(core::iter::repeat(zero), 2 * NUM_HASH_OUT_ELTS);
+        let perm_outs = Self::permute_swapped(perm_inputs, swap, builder);
+        HashOutTarget {
+            elements: perm_outs.squeeze()[0..NUM_HASH_OUT_ELTS]
+                .try_into()
+                .unwrap(),
+        }
+    }
 }
 
 /// Generic configuration trait.

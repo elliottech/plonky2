@@ -7,8 +7,9 @@ use crate::field::extension::{Extendable, FieldExtension};
 use crate::field::goldilocks_field::GoldilocksField as F;
 use crate::field::types::{Field, PrimeField64};
 use crate::gates::poseidon2::Poseidon2Gate;
-use crate::hash::hash_types::{HashOut, RichField};
-use crate::hash::hashing::{compress, hash_n_to_hash_no_pad, PlonkyPermutation};
+use crate::gates::poseidon2_8::poseidon2_compress_8_to_4_swapped;
+use crate::hash::hash_types::{HashOut, HashOutTarget, RichField};
+use crate::hash::hashing::{hash_n_to_hash_no_pad, PlonkyPermutation};
 use crate::iop::ext_target::ExtensionTarget;
 use crate::iop::target::{BoolTarget, Target};
 use crate::plonk::circuit_builder::CircuitBuilder;
@@ -342,6 +343,105 @@ fn external_linear_layer_u128(state: &mut [u128; WIDTH]) {
     }
 }
 
+#[inline]
+#[unroll::unroll_for_loops]
+fn poseidon2_width_8<P: PrimeField64 + Poseidon2>(input: [P; WIDTH_8]) -> [P; WIDTH_8] {
+    let mut state = input;
+
+    external_linear_layer_hl_8(&mut state);
+
+    for r in 0..ROUNDS_F_HALF_8 {
+        add_rc_8(&mut state, r);
+        sbox_8(&mut state);
+        external_linear_layer_hl_8(&mut state);
+    }
+
+    for &rc in INTERNAL_CONSTANTS_8.iter() {
+        state[0] += P::from_canonical_u64(rc);
+        state[0] = P::sbox_p(&state[0]);
+        internal_linear_layer_8(&mut state);
+    }
+
+    for r in ROUNDS_F_HALF_8..ROUNDS_F_8 {
+        add_rc_8(&mut state, r);
+        sbox_8(&mut state);
+        external_linear_layer_hl_8(&mut state);
+    }
+
+    state
+}
+
+#[inline]
+#[unroll::unroll_for_loops]
+fn add_rc_8<P: PrimeField64>(state: &mut [P; WIDTH_8], round: usize) {
+    for i in 0..WIDTH_8 {
+        state[i] = unsafe { state[i].add_canonical_u64(EXTERNAL_CONSTANTS_8[round][i]) };
+    }
+}
+
+#[inline]
+#[unroll::unroll_for_loops]
+fn sbox_8<P: Poseidon2>(state: &mut [P; WIDTH_8]) {
+    for item in state.iter_mut() {
+        *item = P::sbox_p(item);
+    }
+}
+
+#[inline]
+#[unroll::unroll_for_loops]
+fn internal_linear_layer_8<P: PrimeField64>(state: &mut [P; WIDTH_8]) {
+    let sum = sum_8(state);
+    for i in 0..WIDTH_8 {
+        state[i] = sum.multiply_accumulate(state[i], P::from_canonical_u64(MATRIX_DIAG_8_U64[i]));
+    }
+}
+
+#[inline]
+#[unroll::unroll_for_loops]
+fn external_linear_layer_hl_8<P: PrimeField64>(state: &mut [P; WIDTH_8]) {
+    let mut state_u128 = state.map(|x| x.to_noncanonical_u64() as u128);
+    external_linear_layer_hl_u128_8(&mut state_u128);
+    for i in 0..WIDTH_8 {
+        state[i] = P::from_noncanonical_u128_with_96_bits(state_u128[i]);
+    }
+}
+
+#[inline]
+#[unroll::unroll_for_loops]
+fn external_linear_layer_hl_u128_8(state: &mut [u128; WIDTH_8]) {
+    // Horizon Labs 4x4 matrix:
+    // [ 5 7 1 3 ]
+    // [ 4 6 1 1 ]
+    // [ 1 3 5 7 ]
+    // [ 1 1 4 6 ]
+    for i in (0..WIDTH_8).step_by(4) {
+        let t0 = state[i] + state[i + 1];
+        let t1 = state[i + 2] + state[i + 3];
+        let t2 = state[i + 1] + state[i + 1] + t1;
+        let t3 = state[i + 3] + state[i + 3] + t0;
+        let t4 = t1 + t1 + t1 + t1 + t3;
+        let t5 = t0 + t0 + t0 + t0 + t2;
+        let t6 = t3 + t5;
+        let t7 = t2 + t4;
+
+        state[i] = t6;
+        state[i + 1] = t5;
+        state[i + 2] = t7;
+        state[i + 3] = t4;
+    }
+
+    let sums = [
+        state[0] + state[4],
+        state[1] + state[5],
+        state[2] + state[6],
+        state[3] + state[7],
+    ];
+
+    for i in 0..WIDTH_8 {
+        state[i] += sums[i % 4];
+    }
+}
+
 impl Poseidon2 for F {
     #[inline]
     fn sbox_p(a: &Self) -> Self {
@@ -493,6 +593,22 @@ fn sum_12<F: PrimeField64>(inputs: &[F]) -> F {
     F::from_noncanonical_u128_with_96_bits(tmp)
 }
 
+#[inline]
+/// Sum of 8 elements to u128; unrolled for performance.
+fn sum_8<F: PrimeField64>(inputs: &[F]) -> F {
+    debug_assert!(inputs.len() == 8);
+    let tmp = inputs[0].to_noncanonical_u64() as u128
+        + inputs[1].to_noncanonical_u64() as u128
+        + inputs[2].to_noncanonical_u64() as u128
+        + inputs[3].to_noncanonical_u64() as u128
+        + inputs[4].to_noncanonical_u64() as u128
+        + inputs[5].to_noncanonical_u64() as u128
+        + inputs[6].to_noncanonical_u64() as u128
+        + inputs[7].to_noncanonical_u64() as u128;
+
+    F::from_noncanonical_u128_with_96_bits(tmp)
+}
+
 /// Poseidon2 hash function.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct Poseidon2Hash;
@@ -506,11 +622,23 @@ impl<F: RichField + Poseidon2> Hasher<F> for Poseidon2Hash {
     }
 
     fn two_to_one(left: Self::Hash, right: Self::Hash) -> Self::Hash {
-        compress::<F, Self::Permutation>(left, right)
+        let mut input = [F::ZERO; RATE];
+        input[..OUT_8].copy_from_slice(&left.elements);
+        input[OUT_8..].copy_from_slice(&right.elements);
+        Self::hash_8_to_4(input)
     }
 }
 
 impl Poseidon2Hash {
+    #[inline]
+    pub fn hash_8_to_4<P: RichField + Poseidon2>(input: [P; RATE]) -> HashOut<P> {
+        // Width-8 Poseidon2 permutation (single permutation, no padding), then truncate to 4.
+        let state = poseidon2_width_8(input);
+        HashOut {
+            elements: state[..OUT_8].try_into().unwrap(),
+        }
+    }
+
     #[inline]
     #[unroll::unroll_for_loops]
     pub fn hash_n_to_one(
@@ -563,10 +691,24 @@ impl<F: RichField + Poseidon2> AlgebraicHasher<F> for Poseidon2Hash {
             (0..WIDTH).map(|i| Target::wire(gate, Poseidon2Gate::<F, D>::wire_output(i))),
         )
     }
+
+    fn two_to_one_swapped<const D: usize>(
+        left: HashOutTarget,
+        right: HashOutTarget,
+        swap: BoolTarget,
+        builder: &mut CircuitBuilder<F, D>,
+    ) -> HashOutTarget
+    where
+        F: RichField + Extendable<D>,
+    {
+        poseidon2_compress_8_to_4_swapped(builder, left, right, swap)
+    }
 }
 
 #[cfg(test)]
 mod test {
+    use core::array;
+
     use anyhow::Result;
     use num::{BigUint, One};
     use p3_field::{AbstractField, PrimeField64 as _};
@@ -576,7 +718,9 @@ mod test {
     use super::*;
     use crate::field::types::PrimeField64;
     use crate::hash::hashing::hash_n_to_m_no_pad;
-    use crate::hash::poseidon2::p3::p3_poseidon2_hash_n_to_m_no_pad;
+    use crate::hash::poseidon2::p3::{
+        p3_poseidon2_hash_n_to_m_no_pad, p3_poseidon2_permute_8_to_4,
+    };
     use crate::iop::witness::{PartialWitness, WitnessWrite};
     use crate::plonk::circuit_data::CircuitConfig;
     use crate::plonk::config::PoseidonGoldilocksConfig;
@@ -599,11 +743,49 @@ mod test {
             .collect::<Vec<Goldilocks>>();
         let expected_output_f3 = p3_poseidon2_hash_n_to_m_no_pad(&input_f3, 12);
 
-        for i in 0..4 {
+        for i in 0..12 {
             assert_eq!(
                 expected_output_f[i].to_canonical_u64(),
                 expected_output_f3[i].as_canonical_u64()
             );
+        }
+    }
+
+    #[test]
+    fn test_poseidon2_hash_8_to_4_with_plonky3() {
+        let mut rng = thread_rng();
+        for _ in 0..128 {
+            let input = array::from_fn(|_| F::from_noncanonical_u64(rng.next_u64()));
+
+            let expected = Poseidon2Hash::hash_8_to_4(input);
+            let input_p3 = input.map(|x| Goldilocks::from_canonical_u64(x.to_canonical_u64()));
+            let got_p3 = p3_poseidon2_permute_8_to_4(input_p3);
+
+            for i in 0..4 {
+                assert_eq!(
+                    expected.elements[i].to_canonical_u64(),
+                    got_p3[i].as_canonical_u64()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_poseidon2_hash_8_to_4_edge_cases_with_plonky3() {
+        let max = F::from_noncanonical_biguint(F::order() - BigUint::one());
+        let cases: [[F; 8]; 3] = [[F::ZERO; 8], [F::ONE; 8], [max; 8]];
+
+        for input in cases {
+            let expected = Poseidon2Hash::hash_8_to_4(input);
+            let input_p3 = input.map(|x| Goldilocks::from_canonical_u64(x.to_canonical_u64()));
+            let got_p3 = p3_poseidon2_permute_8_to_4(input_p3);
+
+            for i in 0..4 {
+                assert_eq!(
+                    expected.elements[i].to_canonical_u64(),
+                    got_p3[i].as_canonical_u64()
+                );
+            }
         }
     }
 
@@ -672,5 +854,44 @@ mod test {
 
         let proof = circuit.prove(pw).unwrap();
         circuit.verify(proof.clone())
+    }
+
+    #[test]
+    fn test_poseidon2_two_to_one_matches_swapped_false_circuit() -> Result<()> {
+        let mut builder = CircuitBuilder::<F, 2>::new(CircuitConfig::standard_recursion_config());
+        let left_t = builder.add_virtual_hash();
+        let right_t = builder.add_virtual_hash();
+        let expected_t = builder.add_virtual_hash();
+
+        let got_t = <Poseidon2Hash as AlgebraicHasher<F>>::two_to_one_swapped(
+            left_t,
+            right_t,
+            builder._false(),
+            &mut builder,
+        );
+        builder.connect_hashes(got_t, expected_t);
+
+        let circuit = builder.build::<PoseidonGoldilocksConfig>();
+        let mut rng = thread_rng();
+
+        for _ in 0..32 {
+            let left = HashOut::<F> {
+                elements: array::from_fn(|_| F::from_noncanonical_u64(rng.next_u64())),
+            };
+            let right = HashOut::<F> {
+                elements: array::from_fn(|_| F::from_noncanonical_u64(rng.next_u64())),
+            };
+            let expected = <Poseidon2Hash as Hasher<F>>::two_to_one(left, right);
+
+            let mut pw = PartialWitness::new();
+            pw.set_hash_target(left_t, left)?;
+            pw.set_hash_target(right_t, right)?;
+            pw.set_hash_target(expected_t, expected)?;
+
+            let proof = circuit.prove(pw)?;
+            circuit.verify(proof)?;
+        }
+
+        Ok(())
     }
 }
