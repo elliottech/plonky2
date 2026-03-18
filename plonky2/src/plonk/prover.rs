@@ -35,6 +35,11 @@ use crate::util::partial_products::{partial_products_and_z_gx, quotient_chunk_pr
 use crate::util::timing::TimingTree;
 use crate::util::{log2_ceil, transpose};
 
+#[cfg(feature = "metal")]
+fn metal_quotient_available() -> bool {
+    metal::Device::system_default().is_some()
+}
+
 /// Set all the lookup gate wires (including multiplicities) and pad unused LU slots.
 /// Warning: rows are in descending order: the first gate to appear is the last LU gate, and
 /// the last gate to appear is the first LUT gate.
@@ -626,6 +631,62 @@ fn compute_quotient_polys<
 
     let has_lookup = common_data.num_lookup_polys != 0;
 
+    // GPU-accelerated quotient poly: fused gate eval + alpha reduction (no work_mem).
+    // Quotient polynomial computation only uses field arithmetic (GoldilocksField),
+    // not the hasher, so checking F alone is sufficient for GPU dispatch safety.
+    #[cfg(feature = "metal")]
+    {
+        use std::any::TypeId;
+
+        use plonky2_field::goldilocks_field::GoldilocksField;
+
+        use crate::plonk::config::Poseidon2GoldilocksConfig;
+        let lde_size = common_data.lde_size();
+        let is_gl = TypeId::of::<F>() == TypeId::of::<GoldilocksField>();
+        log::info!("quotient dispatch: degree_bits={}, lde_size={}, is_goldilocks={}, has_lookup={}, num_gates={}",
+            common_data.degree_bits(), lde_size, is_gl, has_lookup, common_data.gates.len());
+        if metal_quotient_available() && is_gl && !has_lookup {
+            // Safety: TypeId check above verifies F == GoldilocksField.
+            // Cast through raw pointers to bypass generic D/C bound checking
+            // (compute_quotient_polys_gpu uses concrete D=2 + Poseidon2GoldilocksConfig).
+            let result = unsafe {
+                crate::hash::metal::quotient::compute_quotient_polys_gpu(
+                    &*(common_data as *const CommonCircuitData<F, D>
+                        as *const crate::plonk::circuit_data::CommonCircuitData<
+                            GoldilocksField,
+                            2,
+                        >),
+                    &*(prover_data as *const ProverOnlyCircuitData<F, C, D>
+                        as *const crate::plonk::circuit_data::ProverOnlyCircuitData<
+                            GoldilocksField,
+                            Poseidon2GoldilocksConfig,
+                            2,
+                        >),
+                    &*(public_inputs_hash as *const _ as *const _),
+                    &*(wires_commitment as *const PolynomialBatch<F, C, D>
+                        as *const crate::fri::oracle::PolynomialBatch<
+                            GoldilocksField,
+                            Poseidon2GoldilocksConfig,
+                            2,
+                        >),
+                    &*(zs_partial_products_and_lookup_commitment as *const PolynomialBatch<F, C, D>
+                        as *const crate::fri::oracle::PolynomialBatch<
+                            GoldilocksField,
+                            Poseidon2GoldilocksConfig,
+                            2,
+                        >),
+                    &*(betas as *const [F] as *const [GoldilocksField]),
+                    &*(gammas as *const [F] as *const [GoldilocksField]),
+                    &*(alphas as *const [F] as *const [GoldilocksField]),
+                )
+            };
+            // Safety: Vec<PolynomialCoeffs<GoldilocksField>> has same layout as Vec<PolynomialCoeffs<F>>
+            return unsafe { std::mem::transmute(result) };
+        }
+    }
+
+    let _cpu_quotient_start = std::time::Instant::now();
+
     let quotient_degree_bits = log2_ceil(common_data.quotient_degree_factor);
     assert!(
         quotient_degree_bits <= common_data.config.fri_config.rate_bits,
@@ -807,9 +868,18 @@ fn compute_quotient_polys<
         })
         .collect();
 
-    transpose(&quotient_values)
+    let result: Vec<_> = transpose(&quotient_values)
         .into_par_iter()
         .map(PolynomialValues::new)
         .map(|values| values.coset_ifft(F::coset_shift()))
-        .collect()
+        .collect();
+
+    let lde_size = common_data.lde_size();
+    log::info!(
+        "CPU quotient: lde_size={}, time={:?}",
+        lde_size,
+        _cpu_quotient_start.elapsed()
+    );
+
+    result
 }

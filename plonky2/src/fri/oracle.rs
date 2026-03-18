@@ -25,6 +25,22 @@ use crate::util::{log2_strict, reverse_bits, reverse_index_bits_in_place, transp
 /// Four (~64 bit) field elements gives ~128 bit security.
 pub const SALT_SIZE: usize = 4;
 
+fn splitmix64(mut x: u64) -> u64 {
+    x = x.wrapping_add(0x9e37_79b9_7f4a_7c15);
+    x = (x ^ (x >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    x = (x ^ (x >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    x ^ (x >> 31)
+}
+
+fn deterministic_salt_column<F: Field>(salt_index: usize, len: usize) -> Vec<F> {
+    (0..len)
+        .map(|i| {
+            let seed = splitmix64(0x5341_4c54_5f4c_4445 ^ salt_index as u64 ^ ((i as u64) << 32));
+            F::from_noncanonical_u64(seed.max(1))
+        })
+        .collect()
+}
+
 /// Represents a FRI oracle, i.e. a batch of polynomials which have been Merklized.
 #[derive(Eq, PartialEq, Debug)]
 pub struct PolynomialBatch<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>
@@ -133,7 +149,7 @@ impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>
             .chain(
                 (0..salt_size)
                     .into_par_iter()
-                    .map(|_| F::rand_vec(degree << rate_bits)),
+                    .map(|salt_index| deterministic_salt_column(salt_index, degree << rate_bits)),
             )
             .collect()
     }

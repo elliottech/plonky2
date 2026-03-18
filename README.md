@@ -1,109 +1,88 @@
-# Plonky2 & more
-[![Discord](https://img.shields.io/discord/743511677072572486?logo=discord)](https://discord.gg/QZKRUpqCJ6)
+# plonky2-metal
 
-This repository was originally for Plonky2, a SNARK implementation based on techniques from PLONK and FRI. It has since expanded to include tools such as Starky, a highly performant STARK implementation.
+Apple Silicon (Metal) GPU-accelerated fork of [elliottech/plonky2](https://github.com/elliottech/plonky2). Drop-in replacement — enable the `metal` feature flag and get automatic GPU acceleration with zero code changes.
 
-## ⚠️ Plonky2 Deprecation Notice
+## Benchmark Results
 
-Plonky2 is being deprecated and will no longer receive updates or support.
+Tested on the [lighter-prover](https://github.com/elliottech/lighter-prover) benchmark (500 txs, 125 proving iterations). See [GPU_BENCHMARK_RESULTS.md](./GPU_BENCHMARK_RESULTS.md) for full details.
 
-Please consider using **[Plonky3](https://github.com/Plonky3/Plonky3)** instead, Polygon's next-generation ZK proving system.
+Speedup varies ~21-28% across runs due to thermal/load conditions; we report the conservative end.
 
-## Documentation
+| Configuration | Total Proving Time | Speedup vs CPU |
+|--------------|-------------------|----------------|
+| CPU-only | 634.3s | baseline |
+| GPU Metal (Merkle + Quotient) | 498.8s | **1.27x (21.3% faster)** |
 
-For more details about the Plonky2 argument system, see this [writeup](plonky2/plonky2.pdf).
+### Per-Circuit Breakdown
 
-Polymer Labs has written up a helpful tutorial [here](https://polymerlabs.medium.com/a-tutorial-on-writing-zk-proofs-with-plonky2-part-i-be5812f6b798)!
+| Circuit | Iterations | Size | CPU-only | GPU Metal | Speedup |
+|---------|-----------|------|----------|-----------|---------|
+| BlockTxCircuit | 125 | Large (degree 2^16) | avg 4.29s | avg 3.39s | **1.27x (21.1%)** |
+| BlockTxChainCircuit | 125 | Small (degree 2^14) | avg 774ms | avg 599ms | **1.29x (22.6%)** |
+| BlockPreExecutionCircuit | 1 | Small (degree 2^14) | 859ms | 728ms | **1.18x (15.3%)** |
 
+### GPU Usage (Metal on vs off)
 
-## Examples
+![GPU Usage](gpu_usage.png)
 
-A good starting point for how to use Plonky2 for simple applications is the included examples:
+Left: Metal enabled — GPU actively used for Merkle hashing and quotient polynomial evaluation. Right: Metal disabled — GPU idle, all work on CPU.
 
-* [`factorial`](plonky2/examples/factorial.rs): Proving knowledge of 100!
-* [`fibonacci`](plonky2/examples/fibonacci.rs): Proving knowledge of the hundredth Fibonacci number
-* [`range_check`](plonky2/examples/range_check.rs): Proving that a field element is in a given range
-* [`square_root`](plonky2/examples/square_root.rs): Proving knowledge of the square root of a given field element
+## What's Accelerated
 
-To run an example, use
+Two proving steps are offloaded to the Metal GPU:
 
-```sh
-cargo run --example <example_name>
+1. **Merkle tree construction** (Poseidon2) — GPU hashing for trees with 2^13 to 2^20 leaves
+2. **Quotient polynomial evaluation** — fused gate evaluation + alpha reduction, zero device memory allocation
+
+Both are dispatched automatically at runtime when:
+- Field type is `GoldilocksField`
+- Hasher is `Poseidon2Hash` (for Merkle)
+- No lookup gates (for quotient poly)
+
+If conditions are not met, the code falls back to the original CPU path. On non-macOS platforms, the `metal` feature compiles out entirely.
+
+## How to Use
+
+### Requirements
+
+- **macOS** with **Apple Silicon** (M1/M2/M3/M4)
+- Rust nightly toolchain
+
+### Integration
+
+Add `features = ["metal"]` to your plonky2 dependency:
+
+```toml
+# GPU-accelerated:
+plonky2 = { git = "https://github.com/timemeansalot/plonky2-metal", package = "plonky2", features = ["metal"] }
 ```
 
+That's it. No other code changes required. The Metal shader libraries are pre-compiled and embedded into the binary at build time — no need to install Metal tooling or compile shaders.
 
-## Building
+### Verify it works
 
-Plonky2 requires a recent nightly toolchain, although we plan to transition to stable in the future.
-
-To use a nightly toolchain for Plonky2 by default, you can run
+You should see log output like:
 ```
-rustup override set nightly
-```
-in the Plonky2 directory.
-
-
-## Running
-
-To see recursion performance, one can run this bench, which generates a chain of three recursion proofs:
-
-```sh
-RUSTFLAGS=-Ctarget-cpu=native cargo run --release --example bench_recursion -- -vv
+quotient dispatch: degree_bits=16, lde_size=524288, is_goldilocks=true, has_lookup=false, num_gates=27
+GPU quotient: lde_size=524288, gates=27
 ```
 
-## Jemalloc
+## Files Changed (vs upstream elliottech/plonky2)
 
-Plonky2 prefers the [Jemalloc](http://jemalloc.net) memory allocator due to its superior performance. To use it, include `jemallocator = "0.5.0"` in your `Cargo.toml` and add the following lines
-to your `main.rs`:
+| File | Change |
+|------|--------|
+| `plonky2/Cargo.toml` | Added `metal` and `once_cell` optional dependencies |
+| `plonky2/src/hash/mod.rs` | Added `metal` module |
+| `plonky2/src/hash/metal/` | **New**: GPU runtime, Merkle tree, quotient poly, buffer pool, tracking |
+| `plonky2/src/hash/merkle_tree.rs` | GPU dispatch in `MerkleTree::new()` via TypeId check |
+| `plonky2/src/plonk/prover.rs` | GPU dispatch in `compute_quotient_polys()` via TypeId check |
+| `plonky2/src/plonk/config.rs` | Added `'static` bound to `Hasher` trait (required for TypeId) |
+| `plonky2/shaders/` | **New**: Pre-compiled Metal shader libraries (`.metallib`) and source (`.metal`) |
 
-```rust
-use jemallocator::Jemalloc;
+## Upstream
 
-#[global_allocator]
-static GLOBAL: Jemalloc = Jemalloc;
-```
+Based on [elliottech/plonky2](https://github.com/elliottech/plonky2) at commit `e1c2d354` (Poseidon2 gate support).
 
-Jemalloc is known to cause crashes when a binary compiled for x86 is run on an Apple silicon-based Mac under [Rosetta 2](https://support.apple.com/en-us/HT211861). If you are experiencing crashes on your Apple silicon Mac, run `rustc --print target-libdir`. The output should contain `aarch64-apple-darwin`. If the output contains `x86_64-apple-darwin`, then you are running the Rust toolchain for x86; we recommend switching to the native ARM version.
+## License
 
-## Documentation
-
-Generate documentation locally:
-
-```sh
-cargo doc --no-deps --open
-```
-
-## Contributing guidelines
-
-See [CONTRIBUTING.md](./CONTRIBUTING.md).
-
-## Licenses
-
-All crates of this monorepo are licensed under either of
-
-* Apache License, Version 2.0, ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
-* MIT license ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
-
-at your option.
-
-
-## Security
-
-This code has been audited prior to the `v1.0.0` release. The audits reports and findings are available in the [audits](./audits/) folder of this repository.
-An audited codebase isn't necessarily free of bugs and security exploits, hence we recommend care when using `plonky2` in production settings.
-
-If you find a security issue in the codebase, please refer to our [Security guidelines](./SECURITY.md) for private disclosure.
-
-While Plonky2 is configurable, its defaults generally target 100 bits of security. The default FRI configuration targets 100 bits of *conjectured* security based on the conjecture in [ethSTARK](https://eprint.iacr.org/2021/582).
-
-Plonky2's default hash function is Poseidon, configured with 8 full rounds, 22 partial rounds, a width of 12 field elements (each ~64 bits), and an S-box of `x^7`. [BBLP22](https://tosc.iacr.org/index.php/ToSC/article/view/9850) suggests that this configuration may have around 95 bits of security, falling a bit short of our 100 bit target.
-
-
-## Links
-
-- [Polygon Zero's zkEVM](https://github.com/0xPolygonZero/zk_evm), an efficient Type 1 zkEVM built on top of Starky and plonky2
-- [System Zero](https://github.com/0xPolygonZero/system-zero), a zkVM built on top of Starky
-- [Waksman](https://github.com/0xPolygonZero/plonky2-waksman), Plonky2 gadgets for permutation checking using Waksman networks
-- [Insertion](https://github.com/0xPolygonZero/plonky2-insertion), Plonky2 gadgets for insertion into a list
-- [u32](https://github.com/0xPolygonZero/plonky2-u32), Plonky2 gadgets for u32 arithmetic
-- [ECDSA](https://github.com/0xPolygonZero/plonky2-ecdsa), Plonky2 gadgets for the ECDSA algorithm
+Same as upstream — Apache 2.0 / MIT dual license.

@@ -21,6 +21,23 @@ use crate::plonk::circuit_data::{CommonCircuitData, ProverOnlyCircuitData};
 use crate::plonk::config::GenericConfig;
 use crate::util::serialization::{Buffer, IoResult, Read, Write};
 
+fn splitmix64(mut x: u64) -> u64 {
+    x = x.wrapping_add(0x9e37_79b9_7f4a_7c15);
+    x = (x ^ (x >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    x = (x ^ (x >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    x ^ (x >> 31)
+}
+
+fn deterministic_target_value<F: Field>(target: Target) -> F {
+    let seed = match target {
+        Target::Wire(Wire { row, column }) => {
+            splitmix64(0x5749_5245_5f52_4e47 ^ row as u64 ^ ((column as u64) << 32))
+        }
+        Target::VirtualTarget { index } => splitmix64(0x5649_5254_5f52_4e47 ^ index as u64),
+    };
+    F::from_noncanonical_u64(seed.max(1))
+}
+
 /// Given a `PartitionWitness` that has only inputs set, populates the rest of the witness using the
 /// given set of generators.
 pub fn generate_partial_witness<
@@ -331,8 +348,7 @@ impl<F: RichField + Extendable<D>, const D: usize> SimpleGenerator<F, D> for Ran
         _witness: &PartitionWitness<F>,
         out_buffer: &mut GeneratedValues<F>,
     ) -> Result<()> {
-        let random_value = F::rand();
-        out_buffer.set_target(self.target, random_value)
+        out_buffer.set_target(self.target, deterministic_target_value(self.target))
     }
 
     fn serialize(&self, dst: &mut Vec<u8>, _common_data: &CommonCircuitData<F, D>) -> IoResult<()> {
