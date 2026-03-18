@@ -182,7 +182,8 @@ pub(crate) fn fri_proof_of_work<
 
     let pow_witness = (0..=F::NEG_ONE.to_canonical_u64())
         .into_par_iter()
-        .find_any(|&candidate| {
+        // Pick the first valid witness in canonical order so repeated runs serialize identically.
+        .find_first(|&candidate| {
             let mut duplex_state = duplex_intermediate_state;
             duplex_state.set_elt(F::from_canonical_u64(candidate), witness_input_pos);
             duplex_state.permute();

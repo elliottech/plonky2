@@ -1,7 +1,8 @@
 //! Utility types and functions for Metal GPU Merkle tree implementation.
 
-use metal::MTLSize;
 use std::ptr;
+
+use metal::MTLSize;
 
 /// Uniforms passed to linear+threadgroup Metal shaders. Must match `LinearThreadgroupUniforms` in the MSL shader.
 #[repr(C)]

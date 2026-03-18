@@ -12,9 +12,9 @@ const MERKLE_THREADGROUP_SIZE_ENV: &str = "METAL_MERKLE_THREADGROUP_SIZE";
 ///   - 64k leaves: 128 optimal (0.0702s)
 ///   - 128k leaves: 128 optimal (0.1362s)
 ///   - 16M+ leaves (2^24+): 64 reduces memory contention in bandwidth-bound regime
-const MERKLE_THREADGROUP_SIZE_SMALL: usize = 64;      // For small trees (<16k leaves)
-const MERKLE_THREADGROUP_SIZE_MEDIUM: usize = 128;    // For medium trees (16k-64k leaves)
-const MERKLE_THREADGROUP_SIZE_LARGE: usize = 128;     // For large trees (64k-16M leaves)
+const MERKLE_THREADGROUP_SIZE_SMALL: usize = 64; // For small trees (<16k leaves)
+const MERKLE_THREADGROUP_SIZE_MEDIUM: usize = 128; // For medium trees (16k-64k leaves)
+const MERKLE_THREADGROUP_SIZE_LARGE: usize = 128; // For large trees (64k-16M leaves)
 const MERKLE_THREADGROUP_SIZE_VERY_LARGE: usize = 64; // For very large trees (>= 16M leaves, 2^24+)
 
 /// Get threadgroup size from environment or use default based on leaf count
@@ -28,7 +28,11 @@ const MERKLE_THREADGROUP_SIZE_VERY_LARGE: usize = 64; // For very large trees (>
 /// - A multiple of simd_width (for efficient SIMD execution)
 /// - At least simd_width (to avoid zero-thread dispatches)
 /// - At most max_threads (device limit)
-pub fn get_merkle_threadgroup_size(leaf_count: usize, simd_width: usize, max_threads: usize) -> usize {
+pub fn get_merkle_threadgroup_size(
+    leaf_count: usize,
+    simd_width: usize,
+    max_threads: usize,
+) -> usize {
     // Check for environment variable override
     if let Ok(val) = std::env::var(MERKLE_THREADGROUP_SIZE_ENV) {
         if let Ok(size) = val.parse::<usize>() {
@@ -63,6 +67,7 @@ pub fn get_merkle_threadgroup_size(leaf_count: usize, simd_width: usize, max_thr
 
 /// Get current Merkle threadgroup configuration for diagnostics
 /// Returns (small_default, medium_default, large_default, very_large_default, env_override)
+#[allow(dead_code)]
 pub fn get_merkle_threadgroup_config() -> (usize, usize, usize, usize, Option<usize>) {
     let override_val = std::env::var(MERKLE_THREADGROUP_SIZE_ENV)
         .ok()
@@ -80,6 +85,7 @@ pub fn get_merkle_threadgroup_config() -> (usize, usize, usize, usize, Option<us
 
 /// Compute effective threadgroup size for a given leaf count using a specific pipeline
 /// This is useful for diagnostics to see what size will actually be used
+#[allow(dead_code)]
 pub fn compute_effective_threadgroup_size(
     leaf_count: usize,
     simd_width: usize,

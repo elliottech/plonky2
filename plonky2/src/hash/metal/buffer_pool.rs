@@ -1,11 +1,12 @@
 //! Buffer pool for reusing Metal buffers to avoid allocation overhead.
 //! Groups buffers by size class (power of 2) for efficient reuse.
 
-use metal::Buffer;
-use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
+
+use metal::Buffer;
+use once_cell::sync::Lazy;
 
 /// Buffer pool for reusing Metal buffers to avoid allocation overhead.
 /// Groups buffers by size class (power of 2) for efficient reuse.
@@ -73,6 +74,7 @@ impl BufferPool {
     }
 
     /// Get pool statistics
+    #[allow(dead_code)]
     pub fn stats(&self) -> (usize, usize, usize) {
         (
             self.hits.load(Ordering::Relaxed),
@@ -82,6 +84,7 @@ impl BufferPool {
     }
 
     /// Clear all pooled buffers
+    #[allow(dead_code)]
     pub fn clear(&self) {
         let mut pools = self.pools.lock().unwrap();
         pools.clear();
@@ -89,6 +92,7 @@ impl BufferPool {
     }
 
     /// Reset statistics counters (for per-degree measurement)
+    #[allow(dead_code)]
     pub fn reset_stats(&self) {
         self.hits.store(0, Ordering::Relaxed);
         self.misses.store(0, Ordering::Relaxed);
@@ -98,16 +102,19 @@ impl BufferPool {
 pub static BUFFER_POOL: Lazy<BufferPool> = Lazy::new(BufferPool::new);
 
 /// Get buffer pool statistics (hits, misses, bytes_pooled)
+#[allow(dead_code)]
 pub fn get_buffer_pool_stats() -> (usize, usize, usize) {
     BUFFER_POOL.stats()
 }
 
 /// Reset buffer pool statistics (for per-degree measurement)
+#[allow(dead_code)]
 pub fn reset_buffer_pool_stats() {
     BUFFER_POOL.reset_stats();
 }
 
 /// Clear the buffer pool
+#[allow(dead_code)]
 pub fn clear_buffer_pool() {
     BUFFER_POOL.clear();
 }

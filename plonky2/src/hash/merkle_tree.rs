@@ -11,6 +11,11 @@ use crate::hash::merkle_proofs::MerkleProof;
 use crate::plonk::config::{GenericHashOut, Hasher};
 use crate::util::log2_strict;
 
+#[cfg(feature = "metal")]
+fn metal_merkle_available() -> bool {
+    metal::Device::system_default().is_some()
+}
+
 /// The Merkle cap of height `h` of a Merkle tree is the `h`-th layer (from the root) of the tree.
 /// It can be used in place of the root to verify Merkle paths, which are `h` elements shorter.
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
@@ -202,12 +207,15 @@ impl<F: RichField, H: Hasher<F>> MerkleTree<F, H> {
         #[cfg(feature = "metal")]
         {
             use std::any::TypeId;
-            use crate::hash::poseidon2::hash::Poseidon2Hash;
+
             use plonky2_field::goldilocks_field::GoldilocksField;
+
+            use crate::hash::poseidon2::hash::Poseidon2Hash;
 
             let tree_height = log2_leaves_len;
 
-            if TypeId::of::<H>() == TypeId::of::<Poseidon2Hash>()
+            if metal_merkle_available()
+                && TypeId::of::<H>() == TypeId::of::<Poseidon2Hash>()
                 && TypeId::of::<F>() == TypeId::of::<GoldilocksField>()
                 && cap_height < tree_height
                 && tree_height >= 13
@@ -220,8 +228,9 @@ impl<F: RichField, H: Hasher<F>> MerkleTree<F, H> {
 
                 // SAFETY: We verified F == GoldilocksField via TypeId.
                 // Both are 8-byte types with identical layout (Field: 'static, Copy).
-                let leaves_gl: &[Vec<GoldilocksField>] =
-                    unsafe { &*((&leaves as *const Vec<Vec<F>>).cast::<Vec<Vec<GoldilocksField>>>()) };
+                let leaves_gl: &[Vec<GoldilocksField>] = unsafe {
+                    &*((&leaves as *const Vec<Vec<F>>).cast::<Vec<Vec<GoldilocksField>>>())
+                };
 
                 let mut flat_leaves: Vec<GoldilocksField> =
                     Vec::with_capacity(leaf_count * leaf_size);
@@ -236,15 +245,26 @@ impl<F: RichField, H: Hasher<F>> MerkleTree<F, H> {
                 let leaves_buf = RUNTIME.alloc_with_data(&flat_leaves);
                 let (gpu_digests, gpu_caps) = gpu_thread::GPU_DISPATCHER
                     .dispatch_merkle_poseidon2_linear_threadgroup(
-                        leaves_buf, tree_height, leaf_size, cap_height,
+                        leaves_buf,
+                        tree_height,
+                        leaf_size,
+                        cap_height,
                     );
 
                 // SAFETY: H::Hash == HashOut<GoldilocksField> (verified via TypeId above).
                 // Both are 32-byte Copy types with identical layout.
-                let digests: Vec<H::Hash> =
-                    unsafe { std::mem::transmute::<Vec<crate::hash::hash_types::HashOut<GoldilocksField>>, Vec<H::Hash>>(gpu_digests) };
-                let caps: Vec<H::Hash> =
-                    unsafe { std::mem::transmute::<Vec<crate::hash::hash_types::HashOut<GoldilocksField>>, Vec<H::Hash>>(gpu_caps) };
+                let digests: Vec<H::Hash> = unsafe {
+                    std::mem::transmute::<
+                        Vec<crate::hash::hash_types::HashOut<GoldilocksField>>,
+                        Vec<H::Hash>,
+                    >(gpu_digests)
+                };
+                let caps: Vec<H::Hash> = unsafe {
+                    std::mem::transmute::<
+                        Vec<crate::hash::hash_types::HashOut<GoldilocksField>>,
+                        Vec<H::Hash>,
+                    >(gpu_caps)
+                };
 
                 return Self {
                     leaves,

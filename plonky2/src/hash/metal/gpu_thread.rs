@@ -1,14 +1,15 @@
 //! Dedicated GPU dispatch thread for Metal command buffer operations.
 //! Moves all CommandQueue usage to a single thread, fixing thread safety.
 
-use metal::objc::rc::autoreleasepool;
-use metal::Buffer;
-use once_cell::sync::Lazy;
 use std::sync::mpsc;
 use std::thread;
 
-use crate::hash::hash_types::HashOut;
+use metal::objc::rc::autoreleasepool;
+use metal::Buffer;
+use once_cell::sync::Lazy;
 use plonky2_field::goldilocks_field::GoldilocksField;
+
+use crate::hash::hash_types::HashOut;
 
 type MerkleResult = (Vec<HashOut<GoldilocksField>>, Vec<HashOut<GoldilocksField>>);
 

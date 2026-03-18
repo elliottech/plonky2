@@ -135,8 +135,7 @@ impl MetalRuntime {
             self.get_poseidon2_hash_leaves_linear_threadgroup_pipeline_state();
         let pipeline_hash_tree_level =
             self.get_poseidon2_hash_tree_level_linear_threadgroup_pipeline_state();
-        let pipeline_hash_caps =
-            self.get_poseidon2_hash_caps_linear_threadgroup_pipeline_state();
+        let pipeline_hash_caps = self.get_poseidon2_hash_caps_linear_threadgroup_pipeline_state();
 
         let command_buffer = self.command_queue.new_command_buffer();
 
@@ -161,8 +160,7 @@ impl MetalRuntime {
             encoder.set_buffer(1, Some(&*digests_buffer), 0);
 
             let simd_width = pipeline_hash_leaves.thread_execution_width() as usize;
-            let max_threads =
-                pipeline_hash_leaves.max_total_threads_per_threadgroup() as usize;
+            let max_threads = pipeline_hash_leaves.max_total_threads_per_threadgroup() as usize;
             let num_threads =
                 get_merkle_threadgroup_size(leaf_count, simd_width, max_threads) as u64;
             let lg = (leaf_count as NSUInteger + num_threads - 1) / num_threads;
@@ -198,8 +196,7 @@ impl MetalRuntime {
             let nodes_at_this_level = subtree_leaves_len >> level;
             let total_nodes = nodes_at_this_level * num_caps;
             let simd_width = pipeline_hash_tree_level.thread_execution_width() as usize;
-            let max_threads =
-                pipeline_hash_tree_level.max_total_threads_per_threadgroup() as usize;
+            let max_threads = pipeline_hash_tree_level.max_total_threads_per_threadgroup() as usize;
             let num_threads =
                 get_merkle_threadgroup_size(leaf_count, simd_width, max_threads) as u64;
             let lg = (total_nodes as NSUInteger + num_threads - 1) / num_threads;
@@ -240,10 +237,8 @@ impl MetalRuntime {
             encoder.set_buffer(2, Some(&*uniforms_buffer), 0);
 
             let simd_width = pipeline_hash_caps.thread_execution_width() as usize;
-            let max_threads =
-                pipeline_hash_caps.max_total_threads_per_threadgroup() as usize;
-            let num_threads =
-                get_merkle_threadgroup_size(num_caps, simd_width, max_threads) as u64;
+            let max_threads = pipeline_hash_caps.max_total_threads_per_threadgroup() as usize;
+            let num_threads = get_merkle_threadgroup_size(num_caps, simd_width, max_threads) as u64;
             let lg = (num_caps as NSUInteger + num_threads - 1) / num_threads;
             let thread_group_count = MTLSize {
                 width: lg.max(1),

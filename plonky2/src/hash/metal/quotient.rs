@@ -4,20 +4,20 @@
 //! gate constraints + permutation constraints + alpha reduction + Z_H division.
 //! CPU only handles leaf flattening (pre-process) and coset iFFT (post-process).
 
+use std::time::Instant;
+
 use metal::*;
 use plonky2_field::goldilocks_field::GoldilocksField;
 use plonky2_field::types::{Field, PrimeField64};
 use plonky2_maybe_rayon::*;
-use std::time::Instant;
 
+use super::runtime::RUNTIME;
 use crate::field::polynomial::{PolynomialCoeffs, PolynomialValues};
 use crate::field::zero_poly_coset::ZeroPolyOnCoset;
 use crate::fri::oracle::{PolynomialBatch, SALT_SIZE};
 use crate::plonk::circuit_data::{CommonCircuitData, ProverOnlyCircuitData};
 use crate::plonk::config::{GenericConfig, GenericHashOut, Hasher, Poseidon2GoldilocksConfig};
 use crate::util::{log2_ceil, reverse_bits, transpose};
-
-use super::runtime::RUNTIME;
 
 type F = GoldilocksField;
 type C = Poseidon2GoldilocksConfig;
@@ -86,6 +86,7 @@ const GATE_U48_SUBTRACTION: u32 = 18;
 const GATE_U32_SUBTRACTION: u32 = 19;
 const GATE_U16_ADD_MANY: u32 = 20;
 const GATE_RANGE_CHECK: u32 = 21;
+#[allow(dead_code)]
 const GATE_U16_SUBTRACTION: u32 = 22;
 const GATE_QUINTIC_MULTIPLICATION: u32 = 23;
 const GATE_QUINTIC_SQUARING: u32 = 24;
@@ -195,10 +196,9 @@ pub(crate) fn build_gate_descriptors(
             }
 
             // Compute barycentric weights
-            let bary_weights =
-                crate::field::interpolation::barycentric_weights(
-                    &subgroup.iter().map(|x| (*x, F::ZERO)).collect::<Vec<_>>(),
-                );
+            let bary_weights = crate::field::interpolation::barycentric_weights(
+                &subgroup.iter().map(|x| (*x, F::ZERO)).collect::<Vec<_>>(),
+            );
             for w in &bary_weights {
                 coset_interp_data.push(w.to_canonical_u64());
             }
@@ -275,13 +275,8 @@ pub(crate) fn build_gate_descriptors(
 //===================================================================
 // Flatten LDE leaves for GPU: one contiguous buffer per commitment
 //===================================================================
-fn flatten_lde_leaves(
-    batch: &PolynomialBatch<F, C, D>,
-    lde_size: usize,
-    step: usize,
-) -> Vec<u64> {
-    let leaf_len = batch.merkle_tree.leaves[0].len()
-        - if batch.blinding { SALT_SIZE } else { 0 };
+fn flatten_lde_leaves(batch: &PolynomialBatch<F, C, D>, lde_size: usize, step: usize) -> Vec<u64> {
+    let leaf_len = batch.merkle_tree.leaves[0].len() - if batch.blinding { SALT_SIZE } else { 0 };
     let mut flat = vec![0u64; lde_size * leaf_len];
     flat.par_chunks_mut(leaf_len)
         .enumerate()
@@ -303,8 +298,7 @@ fn flatten_lde_leaves_next(
     step: usize,
     next_step: usize,
 ) -> Vec<u64> {
-    let leaf_len = batch.merkle_tree.leaves[0].len()
-        - if batch.blinding { SALT_SIZE } else { 0 };
+    let leaf_len = batch.merkle_tree.leaves[0].len() - if batch.blinding { SALT_SIZE } else { 0 };
     let mut flat = vec![0u64; lde_size * leaf_len];
     flat.par_chunks_mut(leaf_len)
         .enumerate()
@@ -350,33 +344,50 @@ pub(crate) fn compute_quotient_polys_gpu(
         // Fallback: unknown gate encountered
         log::warn!("GPU quotient: falling back to CPU due to unknown gate");
         return cpu_fallback(
-            common_data, prover_data, public_inputs_hash,
-            wires_commitment, zs_partial_products_commitment,
-            betas, gammas, alphas,
+            common_data,
+            prover_data,
+            public_inputs_hash,
+            wires_commitment,
+            zs_partial_products_commitment,
+            betas,
+            gammas,
+            alphas,
         );
     }
 
     log::info!(
         "GPU quotient: lde_size={}, gates={}",
-        lde_size, gate_descs.len()
+        lde_size,
+        gate_descs.len()
     );
 
     // 1. Flatten leaves (parallelized with Rayon)
     let flat_t = Instant::now();
 
     let wires_stride = wires_commitment.merkle_tree.leaves[0].len()
-        - if wires_commitment.blinding { SALT_SIZE } else { 0 };
+        - if wires_commitment.blinding {
+            SALT_SIZE
+        } else {
+            0
+        };
     let cs_stride = prover_data.constants_sigmas_commitment.merkle_tree.leaves[0].len()
-        - if prover_data.constants_sigmas_commitment.blinding { SALT_SIZE } else { 0 };
+        - if prover_data.constants_sigmas_commitment.blinding {
+            SALT_SIZE
+        } else {
+            0
+        };
     let zs_stride = zs_partial_products_commitment.merkle_tree.leaves[0].len()
-        - if zs_partial_products_commitment.blinding { SALT_SIZE } else { 0 };
+        - if zs_partial_products_commitment.blinding {
+            SALT_SIZE
+        } else {
+            0
+        };
 
     let flat_wires = flatten_lde_leaves(wires_commitment, lde_size, step);
     let flat_cs = flatten_lde_leaves(&prover_data.constants_sigmas_commitment, lde_size, step);
     let flat_zs = flatten_lde_leaves(zs_partial_products_commitment, lde_size, step);
-    let flat_zs_next = flatten_lde_leaves_next(
-        zs_partial_products_commitment, lde_size, step, next_step,
-    );
+    let flat_zs_next =
+        flatten_lde_leaves_next(zs_partial_products_commitment, lde_size, step, next_step);
 
     log::info!(
         "GPU quotient: flatten {:.0}ms ({:.0}MB total)",
@@ -407,7 +418,11 @@ pub(crate) fn compute_quotient_polys_gpu(
         .collect();
 
     // k_is for permutation
-    let k_is_u64: Vec<u64> = common_data.k_is.iter().map(|k| k.to_canonical_u64()).collect();
+    let k_is_u64: Vec<u64> = common_data
+        .k_is
+        .iter()
+        .map(|k| k.to_canonical_u64())
+        .collect();
     let betas_u64: Vec<u64> = betas.iter().map(|b| b.to_canonical_u64()).collect();
     let gammas_u64: Vec<u64> = gammas.iter().map(|g| g.to_canonical_u64()).collect();
     let alphas_u64: Vec<u64> = alphas.iter().map(|a| a.to_canonical_u64()).collect();
@@ -559,10 +574,7 @@ pub(crate) fn compute_quotient_polys_gpu(
         }
 
         // Debug buffer (shader expects buffer(16), minimal size)
-        let buf_debug = device.new_buffer(
-            8 as u64,
-            MTLResourceOptions::StorageModeShared,
-        );
+        let buf_debug = device.new_buffer(8 as u64, MTLResourceOptions::StorageModeShared);
 
         // Release device lock before GPU dispatch
         drop(device);
@@ -683,7 +695,9 @@ fn cpu_fallback(
             for (&i, &x) in indices_batch.iter().zip(xs_batch) {
                 let shifted_x = F::coset_shift() * x;
                 let i_next = (i + next_step) % lde_size;
-                let local_cs = prover_data.constants_sigmas_commitment.get_lde_values(i, step);
+                let local_cs = prover_data
+                    .constants_sigmas_commitment
+                    .get_lde_values(i, step);
                 let local_constants = &local_cs[common_data.constants_range()];
                 let s_sigmas = &local_cs[common_data.sigmas_range()];
                 let local_wires = wires_commitment.get_lde_values(i, step);
@@ -747,9 +761,12 @@ fn cpu_fallback(
                 &empty_lut,
             );
 
-            for (&i, quotient_values) in indices_batch.iter().zip(quotient_values_batch.iter_mut()) {
+            for (&i, quotient_values) in indices_batch.iter().zip(quotient_values_batch.iter_mut())
+            {
                 let denominator_inv = z_h_on_coset.eval_inverse(i);
-                quotient_values.iter_mut().for_each(|v| *v *= denominator_inv);
+                quotient_values
+                    .iter_mut()
+                    .for_each(|v| *v *= denominator_inv);
             }
             quotient_values_batch
         })

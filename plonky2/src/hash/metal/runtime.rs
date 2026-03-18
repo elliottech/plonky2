@@ -1,12 +1,13 @@
 //! MetalRuntime core struct and buffer allocation methods.
 //! Loads Poseidon2 Merkle shaders for GPU-accelerated tree construction.
 
-use metal::*;
-use once_cell::sync::Lazy;
 use std::sync::Mutex;
 
+use metal::*;
+use once_cell::sync::Lazy;
+
 use crate::hash::metal::buffer_pool::{BufferPool, BUFFER_POOL};
-use crate::hash::metal::tracking::{track_allocation, track_deallocation, TrackedBuffer};
+use crate::hash::metal::tracking::{track_allocation, TrackedBuffer};
 
 /// Pre-compiled Poseidon2 linear+threadgroup shader library embedded at build time.
 const SHADERLIB_POSEIDON2_LINEAR_THREADGROUP: &[u8] = include_bytes!(concat!(
@@ -31,6 +32,7 @@ pub struct MetalRuntime {
     pub(crate) pso_poseidon2_hash_leaves_linear_threadgroup: ComputePipelineState,
     pub(crate) pso_poseidon2_hash_tree_level_linear_threadgroup: ComputePipelineState,
     pub(crate) pso_poseidon2_hash_caps_linear_threadgroup: ComputePipelineState,
+    #[allow(dead_code)]
     pub(crate) f_quotient_poly: Function,
     pub(crate) pso_quotient_poly: ComputePipelineState,
     pub(crate) command_queue: CommandQueue,
@@ -154,6 +156,7 @@ impl MetalRuntime {
         )
     }
 
+    #[allow(dead_code)]
     pub fn try_wrap_no_copy<T>(&self, data: &[T]) -> Option<Buffer> {
         let ptr = data.as_ptr() as usize;
         let len = std::mem::size_of_val(data);
@@ -174,6 +177,7 @@ impl MetalRuntime {
         Some(buffer)
     }
 
+    #[allow(dead_code)]
     pub fn wrap_or_copy<T>(&self, data: &[T]) -> Buffer {
         if let Some(buf) = self.try_wrap_no_copy(data) {
             buf
