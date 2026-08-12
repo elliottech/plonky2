@@ -7,7 +7,7 @@ use crate::field::extension::{Extendable, FieldExtension};
 use crate::field::goldilocks_field::GoldilocksField as F;
 use crate::field::types::{Field, PrimeField64};
 use crate::gates::poseidon2::Poseidon2Gate;
-use crate::hash::hash_types::{HashOut, RichField};
+use crate::hash::hash_types::{HashOut, RichField, NUM_HASH_OUT_ELTS};
 use crate::hash::hashing::{compress, hash_n_to_hash_no_pad, PlonkyPermutation};
 use crate::iop::ext_target::ExtensionTarget;
 use crate::iop::target::{BoolTarget, Target};
@@ -26,6 +26,124 @@ pub trait Poseidon2: PrimeField64 {
         Self::full_rounds(&mut state, ROUNDS_F_HALF);
 
         state
+    }
+
+    /// Permute two independent states together. The layers are applied to the
+    /// two states in alternation so the CPU can overlap the serial sbox and
+    /// linear-layer dependency chains of one state with the other's. Each
+    /// state's output is bit-identical to `Self::poseidon2` on that state.
+    #[inline]
+    fn poseidon2_x2(
+        input_a: [Self; WIDTH],
+        input_b: [Self; WIDTH],
+    ) -> ([Self; WIDTH], [Self; WIDTH]) {
+        let mut a = input_a;
+        let mut b = input_b;
+
+        Self::external_linear_layer(&mut a);
+        Self::external_linear_layer(&mut b);
+
+        Self::full_rounds_x2(&mut a, &mut b, 0);
+        Self::partial_rounds_x2(&mut a, &mut b);
+        Self::full_rounds_x2(&mut a, &mut b, ROUNDS_F_HALF);
+
+        (a, b)
+    }
+
+    #[inline]
+    #[unroll::unroll_for_loops]
+    fn full_rounds_x2(a: &mut [Self; WIDTH], b: &mut [Self; WIDTH], start: usize) {
+        for r in start..(start + ROUNDS_F_HALF) {
+            Self::add_rc(a, r);
+            Self::add_rc(b, r);
+            Self::sbox(a);
+            Self::sbox(b);
+            Self::external_linear_layer(a);
+            Self::external_linear_layer(b);
+        }
+    }
+
+    #[inline]
+    #[unroll::unroll_for_loops]
+    fn partial_rounds_x2(a: &mut [Self; WIDTH], b: &mut [Self; WIDTH]) {
+        for r in 0..ROUNDS_P {
+            a[0] += Self::from_canonical_u64(INTERNAL_CONSTANTS[r]);
+            b[0] += Self::from_canonical_u64(INTERNAL_CONSTANTS[r]);
+            a[0] = Self::sbox_p(&a[0]);
+            b[0] = Self::sbox_p(&b[0]);
+            Self::internal_linear_layer_x2(a, b);
+        }
+    }
+
+    /// Four-state variant of `poseidon2_x2`; same bit-identity guarantee.
+    #[inline]
+    fn poseidon2_x4(
+        input_a: [Self; WIDTH],
+        input_b: [Self; WIDTH],
+        input_c: [Self; WIDTH],
+        input_d: [Self; WIDTH],
+    ) -> ([Self; WIDTH], [Self; WIDTH], [Self; WIDTH], [Self; WIDTH]) {
+        let mut a = input_a;
+        let mut b = input_b;
+        let mut c = input_c;
+        let mut d = input_d;
+
+        Self::external_linear_layer(&mut a);
+        Self::external_linear_layer(&mut b);
+        Self::external_linear_layer(&mut c);
+        Self::external_linear_layer(&mut d);
+
+        Self::full_rounds_x4(&mut a, &mut b, &mut c, &mut d, 0);
+        Self::partial_rounds_x4(&mut a, &mut b, &mut c, &mut d);
+        Self::full_rounds_x4(&mut a, &mut b, &mut c, &mut d, ROUNDS_F_HALF);
+
+        (a, b, c, d)
+    }
+
+    #[inline]
+    #[unroll::unroll_for_loops]
+    fn full_rounds_x4(
+        a: &mut [Self; WIDTH],
+        b: &mut [Self; WIDTH],
+        c: &mut [Self; WIDTH],
+        d: &mut [Self; WIDTH],
+        start: usize,
+    ) {
+        for r in start..(start + ROUNDS_F_HALF) {
+            Self::add_rc(a, r);
+            Self::add_rc(b, r);
+            Self::add_rc(c, r);
+            Self::add_rc(d, r);
+            Self::sbox(a);
+            Self::sbox(b);
+            Self::sbox(c);
+            Self::sbox(d);
+            Self::external_linear_layer(a);
+            Self::external_linear_layer(b);
+            Self::external_linear_layer(c);
+            Self::external_linear_layer(d);
+        }
+    }
+
+    #[inline]
+    #[unroll::unroll_for_loops]
+    fn partial_rounds_x4(
+        a: &mut [Self; WIDTH],
+        b: &mut [Self; WIDTH],
+        c: &mut [Self; WIDTH],
+        d: &mut [Self; WIDTH],
+    ) {
+        for r in 0..ROUNDS_P {
+            a[0] += Self::from_canonical_u64(INTERNAL_CONSTANTS[r]);
+            b[0] += Self::from_canonical_u64(INTERNAL_CONSTANTS[r]);
+            c[0] += Self::from_canonical_u64(INTERNAL_CONSTANTS[r]);
+            d[0] += Self::from_canonical_u64(INTERNAL_CONSTANTS[r]);
+            a[0] = Self::sbox_p(&a[0]);
+            b[0] = Self::sbox_p(&b[0]);
+            c[0] = Self::sbox_p(&c[0]);
+            d[0] = Self::sbox_p(&d[0]);
+            Self::internal_linear_layer_x4(a, b, c, d);
+        }
     }
 
     #[inline]
@@ -95,6 +213,29 @@ pub trait Poseidon2: PrimeField64 {
             state[i] =
                 sum.multiply_accumulate(state[i], Self::from_canonical_u64(MATRIX_DIAG_12_U64[i]));
         }
+    }
+
+    /// Apply the internal linear layer to two independent states. Default
+    /// implementation is two sequential calls; Goldilocks overrides with an
+    /// interleaved form that shares the twelve diagonal constants and overlaps
+    /// the independent mul/add chains. Bit-identical to two `internal_linear_layer`
+    /// calls.
+    #[inline]
+    fn internal_linear_layer_x2(a: &mut [Self; WIDTH], b: &mut [Self; WIDTH]) {
+        Self::internal_linear_layer(a);
+        Self::internal_linear_layer(b);
+    }
+
+    /// Four-state variant of `internal_linear_layer_x2`.
+    #[inline]
+    fn internal_linear_layer_x4(
+        a: &mut [Self; WIDTH],
+        b: &mut [Self; WIDTH],
+        c: &mut [Self; WIDTH],
+        d: &mut [Self; WIDTH],
+    ) {
+        Self::internal_linear_layer_x2(a, b);
+        Self::internal_linear_layer_x2(c, d);
     }
 
     #[inline]
@@ -344,6 +485,125 @@ fn external_linear_layer_u128(state: &mut [u128; WIDTH]) {
 
 impl Poseidon2 for F {
     #[inline]
+    fn internal_linear_layer(state: &mut [Self; WIDTH]) {
+        // AArch64 NEON has no native widening 64x64 multiply. The packed
+        // Goldilocks path therefore expands each four-lane product, while the
+        // scalar backend lowers each fixed product directly to `mul`/`umulh`.
+        // Keep the exact historical multiply-then-add order in every lane.
+        let sum = sum_12(state);
+        state[0] = sum + state[0] * F(0xc3b6c08e23ba9300);
+        state[1] = sum + state[1] * F(0xd84b5de94a324fb6);
+        state[2] = sum + state[2] * F(0x0d0c371c5b35b84f);
+        state[3] = sum + state[3] * F(0x7964f570e7188037);
+        state[4] = sum + state[4] * F(0x5daf18bbd996604b);
+        state[5] = sum + state[5] * F(0x6743bc47b9595257);
+        state[6] = sum + state[6] * F(0x5528b9362c59bb70);
+        state[7] = sum + state[7] * F(0xac45e25b7127b68b);
+        state[8] = sum + state[8] * F(0xa2077d7dfbb606b5);
+        state[9] = sum + state[9] * F(0xf3faac6faee378ae);
+        state[10] = sum + state[10] * F(0x0c6388b51545e883);
+        state[11] = sum + state[11] * F(0xd27dbb6944917b60);
+    }
+
+    /// Grouped x2 internal layer: sum both states first, then interleave the
+    /// 24 independent lane expressions so the twelve diagonal immediates are
+    /// shared and the two dependency chains overlap. Bit-identical to two
+    /// sequential `internal_linear_layer` calls.
+    #[inline]
+    fn internal_linear_layer_x2(a: &mut [Self; WIDTH], b: &mut [Self; WIDTH]) {
+        let sum_a = sum_12(a);
+        let sum_b = sum_12(b);
+        a[0] = sum_a + a[0] * F(0xc3b6c08e23ba9300);
+        b[0] = sum_b + b[0] * F(0xc3b6c08e23ba9300);
+        a[1] = sum_a + a[1] * F(0xd84b5de94a324fb6);
+        b[1] = sum_b + b[1] * F(0xd84b5de94a324fb6);
+        a[2] = sum_a + a[2] * F(0x0d0c371c5b35b84f);
+        b[2] = sum_b + b[2] * F(0x0d0c371c5b35b84f);
+        a[3] = sum_a + a[3] * F(0x7964f570e7188037);
+        b[3] = sum_b + b[3] * F(0x7964f570e7188037);
+        a[4] = sum_a + a[4] * F(0x5daf18bbd996604b);
+        b[4] = sum_b + b[4] * F(0x5daf18bbd996604b);
+        a[5] = sum_a + a[5] * F(0x6743bc47b9595257);
+        b[5] = sum_b + b[5] * F(0x6743bc47b9595257);
+        a[6] = sum_a + a[6] * F(0x5528b9362c59bb70);
+        b[6] = sum_b + b[6] * F(0x5528b9362c59bb70);
+        a[7] = sum_a + a[7] * F(0xac45e25b7127b68b);
+        b[7] = sum_b + b[7] * F(0xac45e25b7127b68b);
+        a[8] = sum_a + a[8] * F(0xa2077d7dfbb606b5);
+        b[8] = sum_b + b[8] * F(0xa2077d7dfbb606b5);
+        a[9] = sum_a + a[9] * F(0xf3faac6faee378ae);
+        b[9] = sum_b + b[9] * F(0xf3faac6faee378ae);
+        a[10] = sum_a + a[10] * F(0x0c6388b51545e883);
+        b[10] = sum_b + b[10] * F(0x0c6388b51545e883);
+        a[11] = sum_a + a[11] * F(0xd27dbb6944917b60);
+        b[11] = sum_b + b[11] * F(0xd27dbb6944917b60);
+    }
+
+    /// Grouped x4 internal layer: four independent sums first, then interleaved
+    /// lane updates across the four states. Bit-identical to four sequential
+    /// `internal_linear_layer` calls.
+    #[inline]
+    fn internal_linear_layer_x4(
+        a: &mut [Self; WIDTH],
+        b: &mut [Self; WIDTH],
+        c: &mut [Self; WIDTH],
+        d: &mut [Self; WIDTH],
+    ) {
+        let sum_a = sum_12(a);
+        let sum_b = sum_12(b);
+        let sum_c = sum_12(c);
+        let sum_d = sum_12(d);
+        a[0] = sum_a + a[0] * F(0xc3b6c08e23ba9300);
+        b[0] = sum_b + b[0] * F(0xc3b6c08e23ba9300);
+        c[0] = sum_c + c[0] * F(0xc3b6c08e23ba9300);
+        d[0] = sum_d + d[0] * F(0xc3b6c08e23ba9300);
+        a[1] = sum_a + a[1] * F(0xd84b5de94a324fb6);
+        b[1] = sum_b + b[1] * F(0xd84b5de94a324fb6);
+        c[1] = sum_c + c[1] * F(0xd84b5de94a324fb6);
+        d[1] = sum_d + d[1] * F(0xd84b5de94a324fb6);
+        a[2] = sum_a + a[2] * F(0x0d0c371c5b35b84f);
+        b[2] = sum_b + b[2] * F(0x0d0c371c5b35b84f);
+        c[2] = sum_c + c[2] * F(0x0d0c371c5b35b84f);
+        d[2] = sum_d + d[2] * F(0x0d0c371c5b35b84f);
+        a[3] = sum_a + a[3] * F(0x7964f570e7188037);
+        b[3] = sum_b + b[3] * F(0x7964f570e7188037);
+        c[3] = sum_c + c[3] * F(0x7964f570e7188037);
+        d[3] = sum_d + d[3] * F(0x7964f570e7188037);
+        a[4] = sum_a + a[4] * F(0x5daf18bbd996604b);
+        b[4] = sum_b + b[4] * F(0x5daf18bbd996604b);
+        c[4] = sum_c + c[4] * F(0x5daf18bbd996604b);
+        d[4] = sum_d + d[4] * F(0x5daf18bbd996604b);
+        a[5] = sum_a + a[5] * F(0x6743bc47b9595257);
+        b[5] = sum_b + b[5] * F(0x6743bc47b9595257);
+        c[5] = sum_c + c[5] * F(0x6743bc47b9595257);
+        d[5] = sum_d + d[5] * F(0x6743bc47b9595257);
+        a[6] = sum_a + a[6] * F(0x5528b9362c59bb70);
+        b[6] = sum_b + b[6] * F(0x5528b9362c59bb70);
+        c[6] = sum_c + c[6] * F(0x5528b9362c59bb70);
+        d[6] = sum_d + d[6] * F(0x5528b9362c59bb70);
+        a[7] = sum_a + a[7] * F(0xac45e25b7127b68b);
+        b[7] = sum_b + b[7] * F(0xac45e25b7127b68b);
+        c[7] = sum_c + c[7] * F(0xac45e25b7127b68b);
+        d[7] = sum_d + d[7] * F(0xac45e25b7127b68b);
+        a[8] = sum_a + a[8] * F(0xa2077d7dfbb606b5);
+        b[8] = sum_b + b[8] * F(0xa2077d7dfbb606b5);
+        c[8] = sum_c + c[8] * F(0xa2077d7dfbb606b5);
+        d[8] = sum_d + d[8] * F(0xa2077d7dfbb606b5);
+        a[9] = sum_a + a[9] * F(0xf3faac6faee378ae);
+        b[9] = sum_b + b[9] * F(0xf3faac6faee378ae);
+        c[9] = sum_c + c[9] * F(0xf3faac6faee378ae);
+        d[9] = sum_d + d[9] * F(0xf3faac6faee378ae);
+        a[10] = sum_a + a[10] * F(0x0c6388b51545e883);
+        b[10] = sum_b + b[10] * F(0x0c6388b51545e883);
+        c[10] = sum_c + c[10] * F(0x0c6388b51545e883);
+        d[10] = sum_d + d[10] * F(0x0c6388b51545e883);
+        a[11] = sum_a + a[11] * F(0xd27dbb6944917b60);
+        b[11] = sum_b + b[11] * F(0xd27dbb6944917b60);
+        c[11] = sum_c + c[11] * F(0xd27dbb6944917b60);
+        d[11] = sum_d + d[11] * F(0xd27dbb6944917b60);
+    }
+
+    #[inline]
     fn sbox_p(a: &Self) -> Self {
         let a2 = a.square();
         let a4 = a2.square();
@@ -359,8 +619,25 @@ impl Poseidon2 for F {
         a3 * a4
     }
 
+    /// Adds one external round's constants, each with a single wraparound
+    /// correction.
+    ///
+    /// `add_canonical_u64` is the whole operation: `x + m` wrapped to 64 bits
+    /// plus `EPSILON` on carry. Its precondition is that `m` is canonical,
+    /// which holds for every entry of `EXTERNAL_CONSTANTS` — asserted by
+    /// `external_constants_are_canonical` — and is what bounds `x + m` below
+    /// `2^64 + ORDER` for any `x`, canonical or not, so one correction always
+    /// suffices.
+    ///
+    /// This ran through a vector helper on AArch64 before. The helper is
+    /// value-identical, but it reaches the state through `transmute` and
+    /// `vld1q_u64`/`vst1q_u64`, so the twelve lanes have to be resident in
+    /// memory across it: the copy in, the vector loads, the vector stores and
+    /// the copy back are all traffic the scalar form does not have, and the
+    /// permutation's other layers keep the same lanes in registers on either
+    /// side of it. Twelve independent three-instruction wraparound adds have
+    /// no dependency chain to hide behind vectorisation in the first place.
     #[inline]
-    #[cfg(not(all(target_arch = "aarch64", target_feature = "neon")))]
     fn add_rc(state: &mut [Self; WIDTH], external_round: usize) {
         use plonky2_field::types::Field64;
         debug_assert!(external_round < EXTERNAL_CONSTANTS.len());
@@ -368,26 +645,9 @@ impl Poseidon2 for F {
             .iter_mut()
             .zip(EXTERNAL_CONSTANTS[external_round].iter())
             .for_each(|(x, &m)| {
+                // SAFETY: `m < Self::ORDER` for every external constant.
                 *x = unsafe { x.add_canonical_u64(m) };
             });
-    }
-
-    #[inline]
-    #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
-    fn add_rc(state: &mut [Self; WIDTH], external_round: usize) {
-        debug_assert!(external_round < EXTERNAL_CONSTANTS.len());
-
-        unsafe {
-            use core::mem::transmute;
-
-            use crate::hash::arch::aarch64::poseidon_goldilocks_neon::vector_add;
-
-            let state_u64 = transmute::<[Self; WIDTH], [u64; WIDTH]>(*state);
-            let round_constants = &EXTERNAL_CONSTANTS[external_round];
-
-            let res = vector_add(&state_u64, round_constants);
-            *state = transmute::<[u64; WIDTH], [Self; WIDTH]>(res);
-        }
     }
 
     #[inline]
@@ -493,6 +753,119 @@ fn sum_12<F: PrimeField64>(inputs: &[F]) -> F {
     F::from_noncanonical_u128_with_96_bits(tmp)
 }
 
+/// Hash two equal-length inputs with two lockstep overwrite-mode sponges whose
+/// permutations run interleaved via `poseidon2_x2`. Each output is
+/// bit-identical to `hash_n_to_hash_no_pad` on the corresponding input.
+pub(crate) fn hash_pair_no_pad<F: RichField + Poseidon2>(
+    input_a: &[F],
+    input_b: &[F],
+) -> (HashOut<F>, HashOut<F>) {
+    debug_assert_eq!(input_a.len(), input_b.len());
+    let mut state_a = [F::ZERO; WIDTH];
+    let mut state_b = [F::ZERO; WIDTH];
+
+    for (chunk_a, chunk_b) in input_a.chunks(RATE).zip(input_b.chunks(RATE)) {
+        state_a[..chunk_a.len()].copy_from_slice(chunk_a);
+        state_b[..chunk_b.len()].copy_from_slice(chunk_b);
+        (state_a, state_b) = F::poseidon2_x2(state_a, state_b);
+    }
+
+    (
+        HashOut {
+            elements: state_a[..NUM_HASH_OUT_ELTS].try_into().unwrap(),
+        },
+        HashOut {
+            elements: state_b[..NUM_HASH_OUT_ELTS].try_into().unwrap(),
+        },
+    )
+}
+
+/// Four-input variant of `hash_pair_no_pad`: four lockstep overwrite-mode
+/// sponges over equal-length inputs, permuted via `poseidon2_x4`. Each output
+/// is bit-identical to `hash_n_to_hash_no_pad` on the corresponding input.
+pub(crate) fn hash_quad_no_pad<F: RichField + Poseidon2>(
+    input_a: &[F],
+    input_b: &[F],
+    input_c: &[F],
+    input_d: &[F],
+) -> (HashOut<F>, HashOut<F>, HashOut<F>, HashOut<F>) {
+    debug_assert_eq!(input_a.len(), input_b.len());
+    debug_assert_eq!(input_a.len(), input_c.len());
+    debug_assert_eq!(input_a.len(), input_d.len());
+    let mut state_a = [F::ZERO; WIDTH];
+    let mut state_b = [F::ZERO; WIDTH];
+    let mut state_c = [F::ZERO; WIDTH];
+    let mut state_d = [F::ZERO; WIDTH];
+
+    for (((chunk_a, chunk_b), chunk_c), chunk_d) in input_a
+        .chunks(RATE)
+        .zip(input_b.chunks(RATE))
+        .zip(input_c.chunks(RATE))
+        .zip(input_d.chunks(RATE))
+    {
+        state_a[..chunk_a.len()].copy_from_slice(chunk_a);
+        state_b[..chunk_b.len()].copy_from_slice(chunk_b);
+        state_c[..chunk_c.len()].copy_from_slice(chunk_c);
+        state_d[..chunk_d.len()].copy_from_slice(chunk_d);
+        (state_a, state_b, state_c, state_d) = F::poseidon2_x4(state_a, state_b, state_c, state_d);
+    }
+
+    let out = |state: &[F; WIDTH]| HashOut {
+        elements: state[..NUM_HASH_OUT_ELTS].try_into().unwrap(),
+    };
+    (out(&state_a), out(&state_b), out(&state_c), out(&state_d))
+}
+
+/// Two independent `compress` calls with their permutations interleaved via
+/// `poseidon2_x2`. Each output is bit-identical to `compress` on that pair.
+pub(crate) fn compress_pair<F: RichField + Poseidon2>(
+    x0: HashOut<F>,
+    y0: HashOut<F>,
+    x1: HashOut<F>,
+    y1: HashOut<F>,
+) -> (HashOut<F>, HashOut<F>) {
+    let mut state_a = [F::ZERO; WIDTH];
+    let mut state_b = [F::ZERO; WIDTH];
+    state_a[..NUM_HASH_OUT_ELTS].copy_from_slice(&x0.elements);
+    state_a[NUM_HASH_OUT_ELTS..2 * NUM_HASH_OUT_ELTS].copy_from_slice(&y0.elements);
+    state_b[..NUM_HASH_OUT_ELTS].copy_from_slice(&x1.elements);
+    state_b[NUM_HASH_OUT_ELTS..2 * NUM_HASH_OUT_ELTS].copy_from_slice(&y1.elements);
+
+    let (state_a, state_b) = F::poseidon2_x2(state_a, state_b);
+
+    (
+        HashOut {
+            elements: state_a[..NUM_HASH_OUT_ELTS].try_into().unwrap(),
+        },
+        HashOut {
+            elements: state_b[..NUM_HASH_OUT_ELTS].try_into().unwrap(),
+        },
+    )
+}
+
+/// Four independent `compress` calls with their permutations interleaved via
+/// `poseidon2_x4`. Each output is bit-identical to `compress` on that pair.
+pub(crate) fn compress_quad<F: RichField + Poseidon2>(
+    inputs: [(HashOut<F>, HashOut<F>); 4],
+) -> [HashOut<F>; 4] {
+    let load = |(x, y): (HashOut<F>, HashOut<F>)| {
+        let mut state = [F::ZERO; WIDTH];
+        state[..NUM_HASH_OUT_ELTS].copy_from_slice(&x.elements);
+        state[NUM_HASH_OUT_ELTS..2 * NUM_HASH_OUT_ELTS].copy_from_slice(&y.elements);
+        state
+    };
+    let (a, b, c, d) = F::poseidon2_x4(
+        load(inputs[0]),
+        load(inputs[1]),
+        load(inputs[2]),
+        load(inputs[3]),
+    );
+    let out = |state: [F; WIDTH]| HashOut {
+        elements: state[..NUM_HASH_OUT_ELTS].try_into().unwrap(),
+    };
+    [out(a), out(b), out(c), out(d)]
+}
+
 /// Poseidon2 hash function.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct Poseidon2Hash;
@@ -505,8 +878,167 @@ impl<F: RichField + Poseidon2> Hasher<F> for Poseidon2Hash {
         hash_n_to_hash_no_pad::<F, Self::Permutation>(input)
     }
 
+    fn hash_or_noop_pair(input_a: &[F], input_b: &[F]) -> (Self::Hash, Self::Hash) {
+        debug_assert_eq!(input_a.len(), input_b.len());
+        if input_a.len() * 8 <= <Self as Hasher<F>>::HASH_SIZE {
+            (
+                <Self as Hasher<F>>::hash_or_noop(input_a),
+                <Self as Hasher<F>>::hash_or_noop(input_b),
+            )
+        } else {
+            hash_pair_no_pad::<F>(input_a, input_b)
+        }
+    }
+
+    fn hash_or_noop_quad(
+        input_a: &[F],
+        input_b: &[F],
+        input_c: &[F],
+        input_d: &[F],
+    ) -> (Self::Hash, Self::Hash, Self::Hash, Self::Hash) {
+        debug_assert_eq!(input_a.len(), input_b.len());
+        debug_assert_eq!(input_a.len(), input_c.len());
+        debug_assert_eq!(input_a.len(), input_d.len());
+        if input_a.len() * 8 <= <Self as Hasher<F>>::HASH_SIZE {
+            (
+                <Self as Hasher<F>>::hash_or_noop(input_a),
+                <Self as Hasher<F>>::hash_or_noop(input_b),
+                <Self as Hasher<F>>::hash_or_noop(input_c),
+                <Self as Hasher<F>>::hash_or_noop(input_d),
+            )
+        } else {
+            hash_quad_no_pad::<F>(input_a, input_b, input_c, input_d)
+        }
+    }
+
     fn two_to_one(left: Self::Hash, right: Self::Hash) -> Self::Hash {
         compress::<F, Self::Permutation>(left, right)
+    }
+
+    fn two_to_one_pair(
+        x0: Self::Hash,
+        y0: Self::Hash,
+        x1: Self::Hash,
+        y1: Self::Hash,
+    ) -> (Self::Hash, Self::Hash) {
+        compress_pair::<F>(x0, y0, x1, y1)
+    }
+
+    fn two_to_one_quad(inputs: [(Self::Hash, Self::Hash); 4]) -> [Self::Hash; 4] {
+        compress_quad::<F>(inputs)
+    }
+
+    #[cfg(all(feature = "std", target_arch = "aarch64", target_os = "macos"))]
+    fn try_build_merkle_tree(
+        leaves: &[F],
+        leaf_width: usize,
+        num_leaves: usize,
+        cap_height: usize,
+    ) -> Option<(
+        crate::hash::merkle_tree::LevelOrderDigests<Self::Hash>,
+        Vec<Self::Hash>,
+    )> {
+        super::metal::build_merkle_tree(leaves, leaf_width, num_leaves, cap_height)
+    }
+
+    #[cfg(all(feature = "std", target_arch = "aarch64", target_os = "macos"))]
+    fn try_build_merkle_tree_columns(
+        columns: &[Vec<F>],
+        cap_height: usize,
+    ) -> Option<(
+        crate::hash::merkle_tree::LevelOrderDigests<Self::Hash>,
+        Vec<Self::Hash>,
+    )> {
+        super::metal::build_merkle_tree_columns(columns, cap_height)
+    }
+
+    #[cfg(all(feature = "std", target_arch = "aarch64", target_os = "macos"))]
+    fn try_allocate_merkle_tree_columns(
+        num_columns: usize,
+        num_rows: usize,
+        cap_height: usize,
+    ) -> Option<crate::hash::merkle_tree::ColumnStore<F>> {
+        super::metal::allocate_columns(num_columns, num_rows, cap_height)
+            .map(crate::hash::merkle_tree::ColumnStore::Shared)
+    }
+
+    #[cfg(all(feature = "std", target_arch = "aarch64", target_os = "macos"))]
+    fn try_build_merkle_tree_column_store(
+        columns: &crate::hash::merkle_tree::ColumnStore<F>,
+        cap_height: usize,
+    ) -> Option<(
+        crate::hash::merkle_tree::LevelOrderDigests<Self::Hash>,
+        Vec<Self::Hash>,
+    )> {
+        match columns {
+            crate::hash::merkle_tree::ColumnStore::Owned(columns) => {
+                super::metal::build_merkle_tree_columns(columns, cap_height)
+            }
+            crate::hash::merkle_tree::ColumnStore::Shared(columns) => {
+                super::metal::build_merkle_tree_shared(columns, cap_height)
+            }
+        }
+    }
+
+    #[cfg(all(feature = "std", target_arch = "aarch64", target_os = "macos"))]
+    fn try_build_merkle_tree_column_store_streamed(
+        columns: &crate::hash::merkle_tree::ColumnStore<F>,
+        cap_height: usize,
+        fill_group: &(dyn Fn(usize, &mut [&mut [F]]) + Sync),
+    ) -> Option<(
+        crate::hash::merkle_tree::LevelOrderDigests<Self::Hash>,
+        Vec<Self::Hash>,
+    )> {
+        match columns {
+            crate::hash::merkle_tree::ColumnStore::Owned(_) => None,
+            crate::hash::merkle_tree::ColumnStore::Shared(columns) => {
+                super::metal::build_merkle_tree_shared_streamed(columns, cap_height, fill_group)
+            }
+        }
+    }
+
+    #[cfg(all(feature = "std", target_arch = "aarch64", target_os = "macos"))]
+    fn try_build_commitment_from_coeffs(
+        coeff_columns: &[&[F]],
+        rate_bits: usize,
+        cap_height: usize,
+    ) -> Option<(
+        crate::hash::merkle_tree::ColumnStore<F>,
+        crate::hash::merkle_tree::LevelOrderDigests<Self::Hash>,
+        Vec<Self::Hash>,
+    )> {
+        super::metal::build_commitment_from_coeffs(coeff_columns, rate_bits, cap_height).map(
+            |(columns, digests, cap)| {
+                (
+                    crate::hash::merkle_tree::ColumnStore::Shared(columns),
+                    digests,
+                    cap,
+                )
+            },
+        )
+    }
+
+    #[cfg(all(feature = "std", target_arch = "aarch64", target_os = "macos"))]
+    fn try_build_commitment_from_values(
+        value_columns: &[&[F]],
+        rate_bits: usize,
+        cap_height: usize,
+    ) -> Option<(
+        crate::hash::merkle_tree::ColumnStore<F>,
+        crate::hash::merkle_tree::LevelOrderDigests<Self::Hash>,
+        Vec<Self::Hash>,
+        Vec<Vec<F>>,
+    )> {
+        super::metal::build_commitment_from_values(value_columns, rate_bits, cap_height).map(
+            |(columns, digests, cap, coeffs)| {
+                (
+                    crate::hash::merkle_tree::ColumnStore::Shared(columns),
+                    digests,
+                    cap,
+                    coeffs,
+                )
+            },
+        )
     }
 }
 
@@ -672,5 +1204,85 @@ mod test {
 
         let proof = circuit.prove(pw).unwrap();
         circuit.verify(proof.clone())
+    }
+}
+
+#[cfg(test)]
+mod pair_hash_tests {
+    use plonky2_field::types::Sample;
+
+    use super::*;
+    use crate::plonk::config::Hasher;
+
+    /// `add_rc` calls `add_canonical_u64`, whose safety and single-correction
+    /// argument both require canonical round constants.
+    #[test]
+    fn external_constants_are_canonical() {
+        use plonky2_field::types::Field64;
+        for (round, constants) in EXTERNAL_CONSTANTS.iter().enumerate() {
+            for (i, &c) in constants.iter().enumerate() {
+                assert!(
+                    c < <F as Field64>::ORDER,
+                    "EXTERNAL_CONSTANTS[{round}][{i}] is not canonical"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn pair_hash_matches_individual_across_widths() {
+        for width in [1, 2, 4, 5, 7, 8, 9, 16, 17, 24, 33, 87, 135] {
+            let a: Vec<F> = (0..width).map(|_| F::rand()).collect();
+            let b: Vec<F> = (0..width).map(|_| F::rand()).collect();
+            let (ha, hb) = Poseidon2Hash::hash_or_noop_pair(&a, &b);
+            assert_eq!(
+                ha,
+                <Poseidon2Hash as Hasher<F>>::hash_or_noop(&a),
+                "width {width} a"
+            );
+            assert_eq!(
+                hb,
+                <Poseidon2Hash as Hasher<F>>::hash_or_noop(&b),
+                "width {width} b"
+            );
+        }
+    }
+
+    // Not a correctness test: times sequential sibling-leaf hashing against the
+    // interleaved pair sponge. Run with --nocapture.
+    #[test]
+    fn time_sequential_vs_pair_leaf_hash() {
+        let width = 87;
+        let a: Vec<F> = (0..width).map(|_| F::rand()).collect();
+        let b: Vec<F> = (0..width).map(|_| F::rand()).collect();
+        let iters = 100_000;
+
+        let t0 = std::time::Instant::now();
+        let mut sink_old = F::ZERO;
+        for _ in 0..iters {
+            let ha = <Poseidon2Hash as Hasher<F>>::hash_or_noop(core::hint::black_box(&a));
+            let hb = <Poseidon2Hash as Hasher<F>>::hash_or_noop(core::hint::black_box(&b));
+            sink_old += ha.elements[0] + hb.elements[0];
+        }
+        let old_time = t0.elapsed();
+
+        let t1 = std::time::Instant::now();
+        let mut sink_new = F::ZERO;
+        for _ in 0..iters {
+            let (ha, hb) = Poseidon2Hash::hash_or_noop_pair(
+                core::hint::black_box(&a),
+                core::hint::black_box(&b),
+            );
+            sink_new += ha.elements[0] + hb.elements[0];
+        }
+        let new_time = t1.elapsed();
+
+        assert_eq!(sink_old, sink_new);
+        println!(
+            "sequential: {:?}  interleaved pair: {:?}  speedup: {:.2}x",
+            old_time,
+            new_time,
+            old_time.as_secs_f64() / new_time.as_secs_f64()
+        );
     }
 }

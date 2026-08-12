@@ -12,14 +12,35 @@ use crate::field::types::Field;
 
 pub(crate) mod context_tree;
 pub(crate) mod partial_products;
+#[cfg(feature = "diagnostic_profile")]
+pub mod profile;
 pub mod reducing;
 pub mod serialization;
 pub mod strided_view;
 pub mod timing;
 
-pub(crate) fn transpose_poly_values<F: Field>(polys: Vec<PolynomialValues<F>>) -> Vec<Vec<F>> {
+pub fn transpose_poly_values<F: Field>(polys: Vec<PolynomialValues<F>>) -> Vec<Vec<F>> {
     let poly_values = polys.into_iter().map(|p| p.values).collect::<Vec<_>>();
     transpose(&poly_values)
+}
+
+/// [`transpose_poly_values`] without consuming the input.
+///
+/// Callers that need both the transpose *and* the original columns (the sigma
+/// polynomials are transposed into `prover_only.sigmas` and also committed)
+/// otherwise have to clone every column to keep one copy alive. This reads the
+/// columns in place, so the clone disappears.
+///
+/// Value-identical to `transpose_poly_values(polys.to_vec())`: same output
+/// length (`polys[0].len()`), same row order, and each row gathers
+/// `polys[c].values[i]` for ascending `c` — exactly the gather [`transpose`]
+/// performs. Pure data movement; no arithmetic.
+pub fn transpose_poly_values_ref<F: Field>(polys: &[PolynomialValues<F>]) -> Vec<Vec<F>> {
+    let len = polys[0].len();
+    (0..len)
+        .into_par_iter()
+        .map(|i| polys.iter().map(|p| p.values[i]).collect())
+        .collect()
 }
 
 pub fn transpose<T: Send + Sync + Copy>(matrix: &[Vec<T>]) -> Vec<Vec<T>> {
@@ -28,6 +49,63 @@ pub fn transpose<T: Send + Sync + Copy>(matrix: &[Vec<T>]) -> Vec<Vec<T>> {
         .into_par_iter()
         .map(|i| matrix.iter().map(|row| row[i]).collect())
         .collect()
+}
+
+/// Transposes a column-major matrix (`columns[j][i]`) into one flat row-major
+/// buffer whose row order is bit-reversed: output row `reverse_bits(i)` holds
+/// `columns[0][i], columns[1][i], ...`. The column length must be a power of two.
+///
+/// This fuses `transpose` + `reverse_index_bits_in_place` and produces a single
+/// contiguous allocation instead of one small `Vec` per row.
+///
+/// The permutation is walked from the *output* side: each worker owns a
+/// contiguous run of output rows and reads every element of each row from the
+/// bit-reversed source index. Driving it from the source side instead — walking
+/// `i` in natural order and storing to row `reverse_bits(i)` — moves exactly the
+/// same elements into exactly the same slots, because `reverse_bits` is an
+/// involution on `0..rows` for a fixed bit width, so `r = reverse_bits(i)`
+/// and `i = reverse_bits(r)` describe the same pairing. What differs is which
+/// side of the copy is sequential. `reverse_bits` maps a run of consecutive
+/// indices onto a set spread across the entire domain, so one side is always
+/// scattered; making that side the *loads* rather than the *stores* is what
+/// matters here. Scattered loads are independent and the core keeps many of
+/// them in flight at once, whereas each scattered store of a `width`-element
+/// row claims ownership of the lines it lands on and the row is far shorter
+/// than the distance between consecutive destinations, so the store side
+/// serializes on line ownership and TLB reach instead.
+///
+/// Both directions are pure data movement — no arithmetic on `T` — so every
+/// output element is the identical value, bit for bit, whichever way the loop
+/// runs.
+pub fn transpose_to_bitrev_flat<T: Send + Sync + Copy>(columns: &[Vec<T>]) -> Vec<T> {
+    let width = columns.len();
+    let rows = columns[0].len();
+    debug_assert!(columns.iter().all(|column| column.len() == rows));
+    let log_rows = log2_strict(rows);
+
+    let mut flat: Vec<T> = Vec::with_capacity(width * rows);
+    {
+        let spare = &mut flat.spare_capacity_mut()[..width * rows];
+        spare
+            .par_chunks_mut(width)
+            .enumerate()
+            .for_each(|(leaf, row)| {
+                let natural = reverse_bits(leaf, log_rows);
+                for (j, slot) in row.iter_mut().enumerate() {
+                    // SAFETY: `j < width == columns.len()`, and
+                    // `natural < rows == columns[j].len()` because
+                    // `reverse_bits(_, log_rows)` maps `0..rows` onto itself.
+                    slot.write(unsafe { *columns.get_unchecked(j).get_unchecked(natural) });
+                }
+            });
+    }
+
+    // SAFETY: `par_chunks_mut(width)` partitions the whole `width * rows`
+    // prefix into `rows` disjoint chunks of exactly `width` slots, and the loop
+    // above writes every slot of every chunk exactly once, so the prefix is
+    // fully initialized.
+    unsafe { flat.set_len(width * rows) };
+    flat
 }
 
 pub(crate) const fn reverse_bits(n: usize, num_bits: usize) -> usize {

@@ -76,6 +76,34 @@ pub trait Extendable<const D: usize>: Field + Sized {
     /// we get `Self::BaseField::POWER_OF_TWO_GENERATOR`. This makes `primitive_root_of_unity` coherent
     /// with the base field which implies that the FFT commutes with field inclusion.
     const EXT_POWER_OF_TWO_GENERATOR: [Self; D];
+
+    /// Internal FFT hook. The default preserves general extension
+    /// multiplication; a base field may explicitly specialize multiplication
+    /// by its own embedded twiddles without overlapping trait impls.
+    #[doc(hidden)]
+    #[inline(always)]
+    fn mul_fft_quadratic_base_twiddle(twiddle: [Self; 2], value: [Self; 2]) -> [Self; 2] {
+        let [a0, a1] = twiddle;
+        let [b0, b1] = value;
+        [a0 * b0 + Self::W * a1 * b1, a0 * b1 + a1 * b0]
+    }
+
+    /// Internal fixed-shape FRI hook. The default keeps the historical
+    /// reversed Horner recurrence, including its raw field representation.
+    /// A base field may specialize the production arity without changing the
+    /// generic FRI implementation or any other reduction call site.
+    #[doc(hidden)]
+    #[inline(always)]
+    fn fri_fold_arity16(
+        terms: &[Self::Extension; 16],
+        beta: Self::Extension,
+        _beta_powers: &[Self::Extension; 16],
+    ) -> Self::Extension {
+        terms
+            .iter()
+            .rev()
+            .fold(Self::Extension::ZERO, |acc, &term| acc * beta + term)
+    }
 }
 
 impl<F: Field + Frobenius<1> + FieldExtension<1, BaseField = F>> Extendable<1> for F {

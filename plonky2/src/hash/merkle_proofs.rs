@@ -32,7 +32,7 @@ impl<F: RichField, H: Hasher<F>> MerkleProof<F, H> {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct MerkleProofTarget {
     /// The Merkle digest of each sibling subtree, staying from the bottommost layer.
     pub siblings: Vec<HashOutTarget>,
@@ -359,9 +359,10 @@ mod tests {
         let i_c = builder.constant(F::from_canonical_usize(i));
         let i_bits = builder.split_le(i_c, log_n);
 
-        let data = builder.add_virtual_targets(tree.leaves[i].len());
+        let leaf = tree.leaf_vec(i);
+        let data = builder.add_virtual_targets(leaf.len());
         for j in 0..data.len() {
-            pw.set_target(data[j], tree.leaves[i][j])?;
+            pw.set_target(data[j], leaf[j])?;
         }
 
         builder.verify_merkle_proof_to_cap::<<C as GenericConfig<D>>::InnerHasher>(

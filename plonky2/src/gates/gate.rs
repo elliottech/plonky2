@@ -10,7 +10,7 @@ use std::sync::Arc;
 use hashbrown::HashMap;
 use serde::{Serialize, Serializer};
 
-use crate::field::batch_util::batch_multiply_inplace;
+use crate::field::batch_util::batch_multiply_add_inplace;
 use crate::field::extension::{Extendable, FieldExtension};
 use crate::field::types::Field;
 use crate::gates::selectors::UNUSED_SELECTOR;
@@ -24,6 +24,88 @@ use crate::plonk::vars::{
     EvaluationTargets, EvaluationVars, EvaluationVarsBase, EvaluationVarsBaseBatch,
 };
 use crate::util::serialization::{Buffer, IoResult};
+
+/// Static wire-layout metadata for the base-4 range-check gate quotient
+/// specialization. This lives in the core gate trait so downstream custom
+/// gate crates can opt in without making `plonky2` depend on those crates.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RangeCheckQuotientGate {
+    pub num_ops: usize,
+    pub bit_size: usize,
+}
+
+/// Static wire-layout metadata for gates supported by the optional combined
+/// quotient backend. Keeping only layout values here avoids a dependency from
+/// `plonky2` back to downstream circuit crates.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum U32QuotientGate {
+    Arithmetic {
+        num_ops: usize,
+    },
+    /// Borrowing subtraction of two `base_bits`-wide words. The layout is
+    /// identical at every width: five routed words per operation followed by
+    /// `base_bits / 2` base-4 result limbs.
+    Subtraction {
+        num_ops: usize,
+        base_bits: usize,
+    },
+    /// Addition of `num_addends` `base_bits`-wide words plus a carry, with
+    /// `base_bits / 2` result limbs and `num_carry_limbs` carry limbs.
+    AddMany {
+        num_ops: usize,
+        num_addends: usize,
+        base_bits: usize,
+        num_carry_limbs: usize,
+    },
+    /// Byte decomposition: `1 + num_limbs` routed words (sum then bytes)
+    /// plus `4 * num_limbs` base-4 aux limbs per operation,
+    /// `1 + 5 * num_limbs` constraint rows per operation.
+    ByteDecomposition {
+        num_ops: usize,
+        num_limbs: usize,
+    },
+    /// Degree-5 extension-field multiplication over the base field: fifteen
+    /// routed words per operation (five limbs each for the two inputs and
+    /// the output), five constraint rows per operation.
+    QuinticMultiplication {
+        num_ops: usize,
+    },
+    /// Degree-5 extension-field squaring over the base field: ten routed
+    /// words (input and output limbs) plus ten temporary wires per
+    /// operation, fifteen constraint rows per operation.
+    QuinticSquaring {
+        num_ops: usize,
+    },
+    /// Random access with a little-endian binary index, `2^bits` list items
+    /// per copy, and optional routed local constants.
+    RandomAccess {
+        bits: usize,
+        num_ops: usize,
+        num_extra_constants: usize,
+    },
+    /// Weighted base-field addition with two gate-local constants.
+    BaseAddition {
+        num_ops: usize,
+    },
+    /// Little-endian base decomposition: one sum wire followed by `num_limbs`
+    /// limbs, with the recomposition constraint followed by limb checks.
+    BaseSum {
+        base: usize,
+        num_limbs: usize,
+    },
+    /// Four routed values and one temporary per operation; two constraints.
+    Selection {
+        num_ops: usize,
+    },
+}
+
+/// Exact layout tag for the CPU-side interleave pair specialization. This is
+/// evaluator metadata only and is deliberately absent from serialization.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum InterleavePairGate {
+    Interleave { num_ops: usize },
+    UninterleaveToU32 { num_ops: usize },
+}
 
 /// A custom gate.
 ///
@@ -119,6 +201,23 @@ pub trait Gate<F: RichField + Extendable<D>, const D: usize>: 'static + Send + S
         res
     }
 
+    fn eval_unfiltered_base_batch_accumulate(
+        &self,
+        vars_base: EvaluationVarsBaseBatch<F>,
+        filters: &[F],
+        combined_gate_constraints: &mut [F],
+    ) {
+        let batch_size = vars_base.len();
+        assert_eq!(filters.len(), batch_size);
+        let res_batch = self.eval_unfiltered_base_batch(vars_base);
+        for (combined, res) in combined_gate_constraints
+            .chunks_exact_mut(batch_size)
+            .zip(res_batch.chunks_exact(batch_size))
+        {
+            batch_multiply_add_inplace(combined, res, filters);
+        }
+    }
+
     /// Defines the recursive constraints that enforce the statement represented by this custom gate.
     /// This is necessary to recursively verify proofs generated from a circuit containing such gates.
     ///
@@ -154,8 +253,9 @@ pub trait Gate<F: RichField + Extendable<D>, const D: usize>: 'static + Send + S
             .collect()
     }
 
-    /// The result is an array of length `vars_batch.len() * self.num_constraints()`. Constraint `j`
-    /// for point `i` is at index `j * batch_size + i`.
+    /// Adds this gate's filtered base-field constraints directly to the shared constraint buffer.
+    ///
+    /// Constraint `j` for point `i` is at index `j * batch_size + i`.
     fn eval_filtered_base_batch(
         &self,
         mut vars_batch: EvaluationVarsBaseBatch<F>,
@@ -164,24 +264,34 @@ pub trait Gate<F: RichField + Extendable<D>, const D: usize>: 'static + Send + S
         group_range: Range<usize>,
         num_selectors: usize,
         num_lookup_selectors: usize,
-    ) -> Vec<F> {
-        let filters: Vec<_> = vars_batch
-            .iter()
-            .map(|vars| {
-                compute_filter(
-                    row,
-                    group_range.clone(),
-                    vars.local_constants[selector_index],
-                    num_selectors > 1,
-                )
-            })
-            .collect();
-        vars_batch.remove_prefix(num_selectors + num_lookup_selectors);
-        let mut res_batch = self.eval_unfiltered_base_batch(vars_batch);
-        for res_chunk in res_batch.chunks_exact_mut(filters.len()) {
-            batch_multiply_inplace(res_chunk, &filters);
+        filters: &mut Vec<F>,
+        combined_gate_constraints: &mut [F],
+    ) {
+        let batch_size = vars_batch.len();
+        debug_assert!(self.num_constraints() * batch_size <= combined_gate_constraints.len());
+        // Contiguous-column filter computation: read the selector constant
+        // column once and accumulate the same product terms, in the same
+        // order, as the per-point `compute_filter` — identical field values
+        // without the per-point strided views.
+        let selector_col = &vars_batch.local_constants[selector_index * batch_size..][..batch_size];
+        let mut factors = group_range
+            .filter(|&i| i != row)
+            .chain((num_selectors > 1).then_some(UNUSED_SELECTOR));
+        filters.clear();
+        if let Some(i) = factors.next() {
+            let k = F::from_canonical_usize(i);
+            filters.extend(selector_col.iter().map(|&s| k - s));
+        } else {
+            filters.resize(batch_size, F::ONE);
         }
-        res_batch
+        for i in factors {
+            let k = F::from_canonical_usize(i);
+            for (filter, &s) in filters.iter_mut().zip(selector_col) {
+                *filter *= k - s;
+            }
+        }
+        vars_batch.remove_prefix(num_selectors + num_lookup_selectors);
+        self.eval_unfiltered_base_batch_accumulate(vars_batch, filters, combined_gate_constraints);
     }
 
     /// Adds this gate's filtered constraints into the `combined_gate_constraints` buffer.
@@ -241,6 +351,24 @@ pub trait Gate<F: RichField + Extendable<D>, const D: usize>: 'static + Send + S
     fn num_ops(&self) -> usize {
         self.generators(0, &vec![F::ZERO; self.num_constants()])
             .len()
+    }
+
+    /// Advertises the exact base-4 range-check layout to optional quotient
+    /// backends. The default keeps every other gate backend-agnostic.
+    fn range_check_quotient_gate(&self) -> Option<RangeCheckQuotientGate> {
+        None
+    }
+
+    /// Advertises one of the exact promoted gate layouts to optional quotient
+    /// backends. The default leaves unrelated gates on the CPU.
+    fn u32_quotient_gate(&self) -> Option<U32QuotientGate> {
+        None
+    }
+
+    /// Advertises one of the exact layouts accepted by the optional joint CPU
+    /// evaluator. Unsupported and unpaired gates retain the ordinary path.
+    fn interleave_pair_gate(&self) -> Option<InterleavePairGate> {
+        None
     }
 
     /// Enables gates to store some "routed constants", if they have both unused constants and
@@ -312,6 +440,19 @@ impl<F: RichField + Extendable<D>, const D: usize> Serialize for GateRef<F, D> {
 #[derive(Clone, Debug, Default)]
 pub struct CurrentSlot<F: RichField + Extendable<D>, const D: usize> {
     pub current_slot: HashMap<Vec<F>, (usize, usize)>,
+    /// Memoized [`Gate::num_ops`] for the gate this entry is keyed by.
+    ///
+    /// The default `Gate::num_ops` *materializes* the gate's generator list and returns its
+    /// length, so every call allocates one `WitnessGeneratorRef` (an `Arc`) per operation plus
+    /// the `Vec` holding them, and drops all of it immediately. `find_slot` calls it once per
+    /// packed operation, which is where the overwhelming majority of the circuit's operations
+    /// are placed. Caching it here evaluates it once per distinct gate value instead.
+    ///
+    /// Keying on the entry is exact: `CurrentSlot` entries are keyed by `GateRef`, whose `Eq`
+    /// is `Gate::id()` equality, and every gate's `id()` is a `Debug` rendering of its complete
+    /// configuration. Gates that compare equal therefore have identical fields, and `num_ops`
+    /// is a pure function of those fields.
+    pub num_ops: Option<usize>,
 }
 
 /// A gate along with any constants used to configure it.

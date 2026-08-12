@@ -7,7 +7,7 @@ use anyhow::Result;
 
 use crate::field::extension::Extendable;
 use crate::field::packed::PackedField;
-use crate::gates::gate::Gate;
+use crate::gates::gate::{Gate, U32QuotientGate};
 use crate::gates::packed_util::PackedEvaluableBase;
 use crate::gates::util::StridedConstraintConsumer;
 use crate::hash::hash_types::RichField;
@@ -97,6 +97,19 @@ impl<F: RichField + Extendable<D>, const D: usize> Gate<F, D> for AdditionGate {
         self.eval_unfiltered_base_batch_packed(vars_base)
     }
 
+    fn eval_unfiltered_base_batch_accumulate(
+        &self,
+        vars_base: EvaluationVarsBaseBatch<F>,
+        filters: &[F],
+        combined_gate_constraints: &mut [F],
+    ) {
+        self.eval_unfiltered_base_batch_accumulate_packed(
+            vars_base,
+            filters,
+            combined_gate_constraints,
+        );
+    }
+
     fn eval_unfiltered_circuit(
         &self,
         builder: &mut CircuitBuilder<F, D>,
@@ -153,6 +166,12 @@ impl<F: RichField + Extendable<D>, const D: usize> Gate<F, D> for AdditionGate {
 
     fn num_constraints(&self) -> usize {
         self.num_ops
+    }
+
+    fn u32_quotient_gate(&self) -> Option<U32QuotientGate> {
+        Some(U32QuotientGate::BaseAddition {
+            num_ops: self.num_ops,
+        })
     }
 }
 
@@ -262,5 +281,18 @@ mod tests {
         type F = <C as GenericConfig<D>>::F;
         let gate = AdditionGate::new_from_config(&CircuitConfig::standard_recursion_config());
         test_eval_fns::<F, C, _, D>(gate)
+    }
+
+    #[test]
+    fn metal_quotient_metadata_matches_production_shape() {
+        use crate::gates::gate::{Gate, U32QuotientGate};
+
+        type F = GoldilocksField;
+        const D: usize = 2;
+        let gate = AdditionGate::new_from_config(&CircuitConfig::standard_recursion_config());
+        assert_eq!(
+            <AdditionGate as Gate<F, D>>::u32_quotient_gate(&gate),
+            Some(U32QuotientGate::BaseAddition { num_ops: 26 })
+        );
     }
 }
