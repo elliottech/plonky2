@@ -562,7 +562,7 @@ impl GeneratorWatchIndex {
 }
 
 /// Circuit data required by the prover, but not the verifier.
-#[derive(Eq, PartialEq, Debug)]
+#[derive(Debug)]
 pub struct ProverOnlyCircuitData<
     F: RichField + Extendable<D>,
     C: GenericConfig<D, F = F>,
@@ -629,6 +629,34 @@ pub struct ProverOnlyCircuitData<
     pub constants_sigmas_quotient_step: usize,
     /// Quotient domain size used to extract [`Self::constants_sigmas_quotient_cache`].
     pub constants_sigmas_quotient_domain: usize,
+}
+
+/// Equality over the serialized fields only: the quotient-cache trio is a
+/// runtime-only optimization (not serialized; a deserialized circuit falls
+/// back to the strided gather), so it is excluded from comparisons.
+impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize> PartialEq
+    for ProverOnlyCircuitData<F, C, D>
+{
+    fn eq(&self, other: &Self) -> bool {
+        self.generators == other.generators
+            && self.generator_indices_by_watches == other.generator_indices_by_watches
+            && self.generator_watch_counts == other.generator_watch_counts
+            && self.constants_sigmas_commitment == other.constants_sigmas_commitment
+            && self.sigmas == other.sigmas
+            && self.subgroup == other.subgroup
+            && self.public_inputs == other.public_inputs
+            && self.representative_map == other.representative_map
+            && self.fixed_routed_wires == other.fixed_routed_wires
+            && self.fft_root_table == other.fft_root_table
+            && self.circuit_digest == other.circuit_digest
+            && self.lookup_rows == other.lookup_rows
+            && self.lut_to_lookups == other.lut_to_lookups
+    }
+}
+
+impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize> Eq
+    for ProverOnlyCircuitData<F, C, D>
+{
 }
 
 impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>
