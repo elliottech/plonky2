@@ -88,7 +88,7 @@ impl<F: RichField> ColumnStore<F> {
 }
 
 /// Backing storage for the Merkle tree leaves.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub enum MerkleLeaves<F> {
     /// One flat row-major buffer: leaf `i` occupies `data[i * width..(i + 1) * width]`.
     Rows { data: Vec<F>, width: usize },
@@ -101,6 +101,46 @@ pub enum MerkleLeaves<F> {
         log_rows: usize,
     },
 }
+
+/// Equality is by logical leaf content, not storage layout: a `Columns` tree
+/// and its `Rows` counterpart (e.g. after a serialization round trip, which
+/// always reads back row-major) compare equal when every leaf holds the same
+/// values.
+impl<F: RichField> PartialEq for MerkleLeaves<F> {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                MerkleLeaves::Rows { data, width },
+                MerkleLeaves::Rows {
+                    data: other_data,
+                    width: other_width,
+                },
+            ) => width == other_width && data == other_data,
+            (
+                MerkleLeaves::Columns { columns, log_rows },
+                MerkleLeaves::Columns {
+                    columns: other_columns,
+                    log_rows: other_log_rows,
+                },
+            ) => log_rows == other_log_rows && columns == other_columns,
+            (MerkleLeaves::Rows { data, width }, MerkleLeaves::Columns { columns, log_rows })
+            | (MerkleLeaves::Columns { columns, log_rows }, MerkleLeaves::Rows { data, width }) => {
+                let rows = 1usize << log_rows;
+                if *width != columns.num_cols() || data.len() != rows * width {
+                    return false;
+                }
+                (0..columns.num_cols()).all(|j| {
+                    let col = columns.col(j);
+                    (0..rows).all(|i| {
+                        data[i * width + j] == col[crate::util::reverse_bits(i, *log_rows)]
+                    })
+                })
+            }
+        }
+    }
+}
+
+impl<F: RichField> Eq for MerkleLeaves<F> {}
 
 /// Storage for level-order digests. Metal-produced nodes can remain in their
 /// immutable shared buffer, avoiding a full-tree copy before sparse queries.
