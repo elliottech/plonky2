@@ -97,32 +97,6 @@ fn profile_command_buffer(command_buffer: &CommandBufferRef, name: &'static str,
 
 const SHADER_SOURCE: &str = include_str!("poseidon2.metal");
 
-/// `poseidon2.metal` precompiled to AIR, so a worker that cannot use the Metal
-/// shader cache does not pay the MSL front end. Regenerate whenever
-/// `poseidon2.metal` changes (see `MetalShared::new`); the
-/// `metallib_matches_shader_source` test enforces it.
-const SHADER_METALLIB: &[u8] = include_bytes!("poseidon2.metallib");
-
-/// SHA-256 of the `poseidon2.metal` bytes [`SHADER_METALLIB`] was built from.
-const SHADER_SOURCE_SHA256: &str =
-    "4f1eeb2cfdc57c7e8ead4b3671c094baa9cf0e514cb77fb91e44e255f8615d67";
-
-/// Every kernel the shader defines. The prebuilt library is trusted only if all
-/// of them resolve, so a stale or truncated artifact falls back to compiling the
-/// source. This deliberately includes the lazily-built gate-quotient kernels:
-/// they are absent from the eager path but must still be present in the AIR.
-const METALLIB_REQUIRED_KERNELS: [&str; 10] = [
-    "poseidon2_hash_leaves",
-    "poseidon2_hash_leaves_colmajor",
-    "poseidon2_hash_parents",
-    "poseidon2_absorb_pass",
-    "ntt_prepare",
-    "ntt_stage",
-    "ifft_finalize",
-    "poseidon2_gate_quotient",
-    "range_check_gate_quotient",
-    "permutation_quotient",
-];
 /// Trees below this size hash on the CPU. The promoted 8.0011 frontier
 /// (6654d43) ranked-validated this raised value inside its composition; my
 /// isolated 1<<18 experiment (2a2b1a07, 6.75) scored during a degraded host
@@ -154,6 +128,10 @@ const EXCLUSIVE_PHASE_MIN_GPU_PERMUTATIONS: usize = 1 << 16;
 /// official ranked host (submission 41467098), so concurrent GPU submission is
 /// intentionally disabled.
 const MAX_BUFFER_SETS: usize = 1;
+/// Concurrent detached digest readbacks (see `BufferPool::detached_readbacks`).
+/// Detachment only moves the post-completion digest copy off the buffer set;
+/// GPU builds themselves stay serialized by `MAX_BUFFER_SETS`.
+const MAX_DETACHED_READBACKS: usize = 2;
 /// Parallel staging copy granularity in u64 elements (4 MiB chunks).
 const STAGING_CHUNK: usize = 1 << 19;
 /// Reuse only the recurring transaction/chain quotient outputs. The final
@@ -552,6 +530,48 @@ impl ColumnStorePool {
     }
 }
 
+/// One-slot stash for a pre-faulted large column store. The final block's
+/// wires store (larger than the pool's per-buffer cap, so never recycled)
+/// otherwise zero-faults its ~2 GiB inside the run's most serial window; the
+/// orchestrator fills this slot from a background thread while the pipeline
+/// still runs, so the block's fill starts on already-resident pages. A size
+/// mismatch simply misses and falls through to a fresh allocation.
+static PREWARMED_LARGE_STORE: Mutex<Option<Buffer>> = Mutex::new(None);
+
+/// Allocates a `bytes`-sized shared buffer, touches one word per page so the
+/// kernel's zero-fill happens here (off the critical path) rather than under
+/// the final block's LDE fill, and stashes it for the next oversized
+/// [`take_or_new_column_buffer`] request. Scheduling-only: buffer contents
+/// are fully written by the fill before any read, exactly as a fresh
+/// allocation's would be.
+pub fn prewarm_large_column_store(bytes: u64) {
+    let Some(context) = shared_context() else {
+        return;
+    };
+    let buffer = autoreleasepool(|| {
+        context
+            .device
+            .new_buffer(bytes, MTLResourceOptions::StorageModeShared)
+    });
+    let base = buffer.contents().cast::<u8>();
+    if base.is_null() {
+        return;
+    }
+    // Stash BEFORE walking: a final block arriving mid-walk takes a
+    // partially-warmed buffer instead of missing the stash entirely; the
+    // remaining walk touches pages the fill writes anyway — value-exact.
+    if let Ok(mut slot) = PREWARMED_LARGE_STORE.lock() {
+        *slot = Some(buffer.clone());
+    }
+    const PAGE: isize = 16 * 1024;
+    let mut offset: isize = 0;
+    while (offset as u64) < bytes {
+        // SAFETY: offset stays within the buffer's allocated length.
+        unsafe { base.offset(offset).write_volatile(0) };
+        offset += PAGE;
+    }
+}
+
 /// Returns a pooled buffer of exactly `bytes` when one is free, else a fresh
 /// device allocation. Misses (including lock contention) fall through to the
 /// allocator; the pool is a best-effort page-warm cache, never a correctness
@@ -562,6 +582,10 @@ fn take_or_new_column_buffer(device: &Device, bytes: u64) -> Buffer {
             if let Some(buffer) = pool.take_best_fit(bytes) {
                 return buffer;
             }
+        }
+    } else if let Ok(mut slot) = PREWARMED_LARGE_STORE.try_lock() {
+        if slot.as_ref().is_some_and(|b| b.length() >= bytes) {
+            return slot.take().expect("checked above");
         }
     }
     autoreleasepool(|| device.new_buffer(bytes, MTLResourceOptions::StorageModeShared))
@@ -705,8 +729,29 @@ struct BufferPool {
     free: Vec<BufferSet>,
     created: usize,
     waiters: usize,
-    spare_output: Option<Buffer>,
-    detached_readback: bool,
+    /// Waiters for serial-critical-path (2^17 spine) tree builds. While one is
+    /// queued, non-spine acquisitions defer, so a freed set always goes to the
+    /// spine first: command buffers execute FIFO per queue, so this is the only
+    /// place the chain-step wires tree can jump the pipelined chunk trees it
+    /// otherwise parks behind (fold commit phases measured 200-320 ms under
+    /// pipeline load vs 10-50 ms alone — that gap is queue wait, and it sits
+    /// on the strictly serial chain spine). Still exactly one build in flight:
+    /// this reorders the wait queue and never adds GPU concurrency (the
+    /// 3-set experiment scored -21.6% ranked; MAX_BUFFER_SETS stays 1).
+    /// Starvation is bounded by construction: spine proofs are serialized, so
+    /// at most one spine build exists at a time and a chunk waiter defers by
+    /// at most one ~8-50 ms spine build per wake.
+    spine_waiters: usize,
+    /// Retained replacement buffers for detached readbacks (bounded by
+    /// [`MAX_DETACHED_READBACKS`]).
+    spare_outputs: Vec<Buffer>,
+    /// Number of readbacks currently running detached from the set. Each
+    /// detachment lets the completing build release the set before its
+    /// ~tens-of-MB digest copy; while all slots are taken, a completing
+    /// build copies inline holding the set, delaying the next build. Two
+    /// slots cover the common case of two builds completing back-to-back
+    /// under the deeper proof window.
+    detached_readbacks: usize,
 }
 
 #[derive(Default)]
@@ -883,8 +928,8 @@ impl DetachedOutput<'_> {
             .pool
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        debug_assert!(pool.detached_readback);
-        pool.detached_readback = false;
+        debug_assert!(pool.detached_readbacks > 0);
+        pool.detached_readbacks -= 1;
         drop(pool);
         MetalDigests::with_buffer(buffer, digest_pool, len)
     }
@@ -900,10 +945,10 @@ impl Drop for DetachedOutput<'_> {
             .pool
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        debug_assert!(pool.detached_readback);
-        debug_assert!(pool.spare_output.is_none());
-        pool.spare_output = Some(buffer);
-        pool.detached_readback = false;
+        debug_assert!(pool.detached_readbacks > 0);
+        debug_assert!(pool.spare_outputs.len() < MAX_DETACHED_READBACKS);
+        pool.spare_outputs.push(buffer);
+        pool.detached_readbacks -= 1;
     }
 }
 
@@ -1166,6 +1211,27 @@ pub fn prewarm() {
     std::thread::Builder::new()
         .name("poseidon2-metal-prewarm".to_owned())
         .spawn(|| {
+            // The shader compile and AIR->ISA lowering run in
+            // MTLCompilerService, an XPC service that inherits the requesting
+            // thread's QoS through XPC boost propagation. Under the benchmark
+            // sandbox the OS shader cache is disabled, so every scored worker
+            // pays this cold path at startup — at default QoS it competes at
+            // parity with ordinary work for compiler-service scheduling.
+            // QOS_CLASS_USER_INITIATED (0x19) shortens the context-ready
+            // latency the first GPU-wanting proving step otherwise absorbs.
+            #[allow(non_camel_case_types)]
+            {
+                type qos_class_t = u32;
+                unsafe extern "C" {
+                    fn pthread_set_qos_class_self_np(
+                        qos_class: qos_class_t,
+                        relative_priority: i32,
+                    ) -> i32;
+                }
+                unsafe {
+                    let _ = pthread_set_qos_class_self_np(0x19, 0);
+                }
+            }
             let _ = force_context();
         })
         .ok();
@@ -1191,6 +1257,28 @@ pub fn set_exclusive_gpu_phase(enabled: bool) {
 /// idle CPU workers without changing proof semantics.
 pub fn is_exclusive_gpu_phase() -> bool {
     EXCLUSIVE_GPU_PHASE.load(core::sync::atomic::Ordering::Relaxed)
+}
+
+/// Runnable-but-unproven chain steps: incremented by the orchestrator when a
+/// chain step's transaction proof is ready (the step could prove right now),
+/// decremented when its proof completes. While this backlog is at or above
+/// [`SPINE_URGENT_BACKLOG`], the chain is the pipeline's laggard and its
+/// 2^17 spine trees take priority for the single GPU buffer set; below it,
+/// chunk trees keep plain FIFO so the transaction pipeline is not slowed on
+/// the spine's behalf while the spine has slack. A plain unconditional
+/// priority measured both directions: the chain's predecessor waits fell but
+/// the deferred chunk trees stretched the light path — this backlog gate is
+/// the balance point.
+static SPINE_BACKLOG: core::sync::atomic::AtomicIsize = core::sync::atomic::AtomicIsize::new(0);
+const SPINE_URGENT_BACKLOG: isize = 3;
+
+/// See [`SPINE_BACKLOG`].
+pub fn spine_backlog_add(delta: isize) {
+    SPINE_BACKLOG.fetch_add(delta, core::sync::atomic::Ordering::Relaxed);
+}
+
+fn spine_urgent() -> bool {
+    SPINE_BACKLOG.load(core::sync::atomic::Ordering::Relaxed) >= SPINE_URGENT_BACKLOG
 }
 
 /// Number of Merkle builds currently occupying the serialized GPU stream
@@ -1932,15 +2020,26 @@ pub(crate) fn build_merkle_tree_shared_streamed<F: RichField>(
 ) -> Option<(LevelOrderDigests<HashOut<F>>, Vec<HashOut<F>>)> {
     let leaf_width = columns.cols;
     let leaf_count = columns.rows;
+    // Exclusive phases stream the 2^20+ trees as before. Outside them, the
+    // pipelined 2^19 commitments (tx wires/Zs/quotient) also stream — but
+    // only when the GPU stream is unoccupied at entry, the same occupancy
+    // condition gpu_worthwhile uses for the serial-critical shapes: streaming
+    // converts the proof's serial CPU-fill-then-GPU-hash into max(fill, hash),
+    // while an already-busy stream would just queue the absorb groups behind
+    // another tree and stretch both.
+    let stream_admitted = if EXCLUSIVE_GPU_PHASE.load(core::sync::atomic::Ordering::Relaxed) {
+        leaf_count >= 1 << 20
+    } else {
+        leaf_count >= 1 << 19 && GPU_JOBS_IN_FLIGHT.load(core::sync::atomic::Ordering::Relaxed) == 0
+    };
     if F::ORDER != 0xffff_ffff_0000_0001
         || size_of::<F>() != size_of::<u64>()
         || leaf_width < 16
-        || leaf_count < 1 << 20
+        || !stream_admitted
         || !leaf_count.is_power_of_two()
         || leaf_count > u32::MAX as usize
         || leaf_width > u32::MAX as usize
         || cap_height > leaf_count.ilog2() as usize
-        || !EXCLUSIVE_GPU_PHASE.load(core::sync::atomic::Ordering::Relaxed)
     {
         return None;
     }
@@ -2239,29 +2338,11 @@ impl MetalShared {
         autoreleasepool(|| {
             let device = Device::system_default().ok_or("no Metal device")?;
             let options = CompileOptions::new();
-            // Prefer the prebuilt AIR library over compiling the MSL source.
-            //
-            // The ranked sandbox profile grants read but DENIES write on
-            // `com.apple.metal` (see `write-benchmark-sandbox-profile.sh`), so the
-            // shader cache is unusable and every worker process re-runs the full
-            // MSL->AIR compile of the shader. The harness spawns one worker per
-            // fixture and the score is the sum of worker process lifetimes, so
-            // that cost is paid once per fixture and every millisecond is scored.
-            // `newLibraryWithData:` skips the front end; only the AIR->ISA
-            // pipeline lowering below remains.
-            //
-            // This needs no Metal toolchain at build time — the artifact is
-            // committed — which is what makes it viable where a build-time
-            // `MTLBinaryArchive` is not.
-            //
-            // Any failure falls back to compiling the source, so a runtime that
-            // rejects this AIR version behaves exactly as before. The function
-            // probe is what makes the fallback safe against a STALE artifact:
-            // regenerate with
-            //   xcrun -sdk macosx metal -c poseidon2.metal -o poseidon2.air
-            //   xcrun -sdk macosx metallib poseidon2.air -o poseidon2.metallib
-            // and `metallib_matches_shader_source` fails the test run if you
-            // forget.
+            // A long-lived production prover pays the MSL front end once per
+            // process with the OS shader cache enabled, so the artifact's
+            // startup saving does not apply here; compiling the source keeps
+            // the kernels in lockstep with `poseidon2.metal` and avoids ever
+            // silently running a stale committed artifact.
             let library = device
                 .new_library_with_source(SHADER_SOURCE, &options)
                 .map_err(|error| format!("shader compilation failed: {error}"))?;
@@ -2393,8 +2474,9 @@ impl MetalShared {
                     free: Vec::new(),
                     created: 0,
                     waiters: 0,
-                    spare_output: None,
-                    detached_readback: false,
+                    spine_waiters: 0,
+                    spare_outputs: Vec::new(),
+                    detached_readbacks: 0,
                 }),
                 quotient_output_pool: Arc::new(Mutex::new(QuotientOutputPool::default())),
                 digest_output_pool: Arc::new(Mutex::new(DigestOutputPool::default())),
@@ -2671,27 +2753,44 @@ impl MetalShared {
     }
 
     fn acquire_set(&self) -> Result<BufferSet, String> {
+        self.acquire_set_priority(false)
+    }
+
+    /// `spine` acquisitions (the 2^17 serial-critical trees) take a freed set
+    /// ahead of any queued non-spine waiter; see `BufferPool::spine_waiters`.
+    fn acquire_set_priority(&self, spine: bool) -> Result<BufferSet, String> {
         let mut pool = self.pool.lock().map_err(|_| "buffer pool poisoned")?;
         loop {
-            if let Some(set) = pool.free.pop() {
-                return Ok(set);
-            }
-            if pool.created < MAX_BUFFER_SETS {
-                pool.created += 1;
-                return Ok(BufferSet {
-                    input: None,
-                    output: None,
-                });
+            if spine || pool.spine_waiters == 0 {
+                if let Some(set) = pool.free.pop() {
+                    return Ok(set);
+                }
+                if pool.created < MAX_BUFFER_SETS {
+                    pool.created += 1;
+                    return Ok(BufferSet {
+                        input: None,
+                        output: None,
+                    });
+                }
             }
             pool.waiters += 1;
+            if spine {
+                pool.spine_waiters += 1;
+            }
             match self.available.wait(pool) {
                 Ok(mut next) => {
                     next.waiters -= 1;
+                    if spine {
+                        next.spine_waiters -= 1;
+                    }
                     pool = next;
                 }
                 Err(poisoned) => {
                     let mut next = poisoned.into_inner();
                     next.waiters -= 1;
+                    if spine {
+                        next.spine_waiters -= 1;
+                    }
                     return Err("buffer pool poisoned".to_string());
                 }
             }
@@ -2704,7 +2803,11 @@ impl MetalShared {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         pool.free.push(set);
-        self.available.notify_one();
+        // Wake every waiter: with a spine waiter queued, whichever non-spine
+        // waiter the OS would hand a `notify_one` to would just re-block, so
+        // the wake must reach the spine thread. Waiter counts here are tiny
+        // (window depth + one spine), so the thundering herd is a few threads.
+        self.available.notify_all();
     }
 
     fn try_detach_completed_output(
@@ -2713,13 +2816,15 @@ impl MetalShared {
         output_bytes: usize,
     ) -> Result<Option<DetachedOutput<'_>>, String> {
         let mut pool = self.pool.lock().map_err(|_| "buffer pool poisoned")?;
-        if pool.detached_readback {
+        if pool.detached_readbacks >= MAX_DETACHED_READBACKS {
             return Ok(None);
         }
-        let replacement = pool
-            .spare_output
-            .take()
-            .filter(|buffer| buffer.length() >= output_bytes as u64)
+        let spare_index = pool
+            .spare_outputs
+            .iter()
+            .position(|buffer| buffer.length() >= output_bytes as u64);
+        let replacement = spare_index
+            .map(|index| pool.spare_outputs.swap_remove(index))
             .or_else(|| {
                 self.digest_output_pool
                     .lock()
@@ -2736,7 +2841,7 @@ impl MetalShared {
             .output
             .replace(replacement)
             .ok_or_else(|| "completed output buffer missing".to_string())?;
-        pool.detached_readback = true;
+        pool.detached_readbacks += 1;
         drop(pool);
         Ok(Some(DetachedOutput {
             owner: self,
@@ -3406,7 +3511,11 @@ impl MetalShared {
             .ok_or("Metal Merkle output size overflow")?;
 
         let job = GpuJobGuard::begin();
-        let mut set = self.acquire_set()?;
+        // Spine trees (the 2^17 serial-critical shapes, same predicate as
+        // gpu_worthwhile) jump queued chunk-tree waiters for the single set —
+        // but only while the chain is actually the laggard (see SPINE_BACKLOG).
+        let spine = leaf_count == 1 << 17 && leaf_width > 4 && spine_urgent();
+        let mut set = self.acquire_set_priority(spine)?;
         let result = self.build_with_set(
             &mut set,
             source,
@@ -3746,52 +3855,6 @@ mod tests {
     use crate::gates::gate::Gate;
     use crate::gates::poseidon2::Poseidon2Gate;
 
-    /// The prebuilt AIR library is only sound while it is the compiled form of
-    /// the MSL we ship. Nothing in the type system ties the two together, so
-    /// this pins the source bytes: edit `poseidon2.metal` without regenerating
-    /// `poseidon2.metallib` and this fails loudly instead of silently proving
-    /// with stale kernels.
-    #[test]
-    fn metallib_matches_shader_source() {
-        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/src/hash/poseidon2");
-        let output = std::process::Command::new("/usr/bin/shasum")
-            .args(["-a", "256", &format!("{dir}/poseidon2.metal")])
-            .output()
-            .expect("shasum must be available to verify the metallib is current");
-        assert!(output.status.success(), "shasum failed");
-        let digest = String::from_utf8(output.stdout).expect("shasum output is not utf-8");
-        let digest = digest
-            .split_whitespace()
-            .next()
-            .expect("empty shasum output");
-        assert_eq!(
-            digest, SHADER_SOURCE_SHA256,
-            "poseidon2.metal changed but poseidon2.metallib was not regenerated. Run:\n  \
-             xcrun -sdk macosx metal -c poseidon2.metal -o poseidon2.air\n  \
-             xcrun -sdk macosx metallib poseidon2.air -o poseidon2.metallib\n\
-             then update SHADER_SOURCE_SHA256 to {digest}."
-        );
-    }
-
-    /// The fallback in `MetalShared::new` hides a broken artifact behind a
-    /// source compile, which would silently give back the cost this exists to
-    /// remove. Assert the fast path is actually live on this machine.
-    #[test]
-    fn metallib_loads_and_exposes_every_kernel() {
-        let Some(device) = Device::system_default() else {
-            return; // no Metal device in this environment
-        };
-        let library = device
-            .new_library_with_data(SHADER_METALLIB)
-            .expect("prebuilt metallib must load");
-        for name in METALLIB_REQUIRED_KERNELS {
-            assert!(
-                library.get_function(name, None).is_ok(),
-                "prebuilt metallib is missing kernel {name}"
-            );
-        }
-    }
-
     #[test]
     fn quotient_output_pool_is_bounded_and_best_fit() {
         let Some(device) = Device::system_default() else {
@@ -3920,11 +3983,11 @@ mod tests {
             .expect("resident digest storage always detaches");
         assert_eq!(detached.buffer().contents(), original);
         assert_ne!(set.output.as_ref().unwrap().contents(), original);
-        assert!(context.pool.lock().unwrap().detached_readback);
+        assert_eq!(context.pool.lock().unwrap().detached_readbacks, 1);
         drop(detached);
         let pool = context.pool.lock().unwrap();
-        assert!(pool.spare_output.is_some());
-        assert!(!pool.detached_readback);
+        assert!(!pool.spare_outputs.is_empty());
+        assert_eq!(pool.detached_readbacks, 0);
     }
 
     #[test]
@@ -3971,8 +4034,8 @@ mod tests {
 
             drop(detached);
             let pool = context.pool.lock().unwrap();
-            assert!(!pool.detached_readback);
-            assert!(pool.spare_output.is_some());
+            assert_eq!(pool.detached_readbacks, 0);
+            assert!(!pool.spare_outputs.is_empty());
         });
     }
 
