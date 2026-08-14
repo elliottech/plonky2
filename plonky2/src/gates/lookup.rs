@@ -40,6 +40,7 @@ pub struct LookupGate {
     lut: LookupTable,
     /// The Keccak hash of the lookup table.
     lut_hash: [u8; 32],
+    dynamic: bool,
 }
 
 impl LookupGate {
@@ -53,7 +54,14 @@ impl LookupGate {
             num_slots: Self::num_slots(config),
             lut,
             lut_hash: keccak(table_bytes).0,
+            dynamic: false,
         }
+    }
+
+    pub fn new_dynamic(config: &CircuitConfig, lut: LookupTable) -> Self {
+        let mut gate = Self::new_from_table(config, lut);
+        gate.dynamic = true;
+        gate
     }
     pub(crate) const fn num_slots(config: &CircuitConfig) -> usize {
         let wires_per_lookup = 2;
@@ -80,6 +88,7 @@ impl<F: RichField + Extendable<D>, const D: usize> Gate<F, D> for LookupGate {
 
     fn serialize(&self, dst: &mut Vec<u8>, common_data: &CommonCircuitData<F, D>) -> IoResult<()> {
         dst.write_usize(self.num_slots)?;
+        dst.write_bool(self.dynamic)?;
         for (i, lut) in common_data.luts.iter().enumerate() {
             if lut == &self.lut {
                 dst.write_usize(i)?;
@@ -92,6 +101,7 @@ impl<F: RichField + Extendable<D>, const D: usize> Gate<F, D> for LookupGate {
 
     fn deserialize(src: &mut Buffer, common_data: &CommonCircuitData<F, D>) -> IoResult<Self> {
         let num_slots = src.read_usize()?;
+        let dynamic = src.read_bool()?;
         let lut_index = src.read_usize()?;
         let mut lut_hash = [0u8; 32];
         src.read_exact(&mut lut_hash)?;
@@ -100,6 +110,7 @@ impl<F: RichField + Extendable<D>, const D: usize> Gate<F, D> for LookupGate {
             num_slots,
             lut: common_data.luts[lut_index].clone(),
             lut_hash,
+            dynamic,
         })
     }
 

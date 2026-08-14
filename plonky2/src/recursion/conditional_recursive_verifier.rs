@@ -75,6 +75,7 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
             proof:
                 ProofTarget {
                     wires_cap: wires_cap0,
+                    lookup_table_cap: lookup_table_cap0,
                     plonk_zs_partial_products_cap: plonk_zs_partial_products_cap0,
                     quotient_polys_cap: quotient_polys_cap0,
                     openings: openings0,
@@ -86,6 +87,7 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
             proof:
                 ProofTarget {
                     wires_cap: wires_cap1,
+                    lookup_table_cap: lookup_table_cap1,
                     plonk_zs_partial_products_cap: plonk_zs_partial_products_cap1,
                     quotient_polys_cap: quotient_polys_cap1,
                     openings: openings1,
@@ -95,6 +97,11 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
         } = proof_with_pis1;
         with_context!(self, "select proof", {
             let selected_wires_cap = self.select_cap(b, wires_cap0, wires_cap1);
+            let selected_lookup_table_cap = match (lookup_table_cap0, lookup_table_cap1) {
+                (Some(cap0), Some(cap1)) => Some(self.select_cap(b, cap0, cap1)),
+                (None, None) => None,
+                _ => panic!("lookup table commitment shape mismatch"),
+            };
             let selected_plonk_zs_partial_products_cap = self.select_cap(
                 b,
                 plonk_zs_partial_products_cap0,
@@ -109,6 +116,7 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
             ProofWithPublicInputsTarget {
                 proof: ProofTarget {
                     wires_cap: selected_wires_cap,
+                    lookup_table_cap: selected_lookup_table_cap,
                     plonk_zs_partial_products_cap: selected_plonk_zs_partial_products_cap,
                     quotient_polys_cap: selected_quotient_polys_cap,
                     openings: selected_openings,
@@ -197,6 +205,7 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
             constants: self.select_vec_ext(b, &os0.constants, &os1.constants),
             plonk_sigmas: self.select_vec_ext(b, &os0.plonk_sigmas, &os1.plonk_sigmas),
             wires: self.select_vec_ext(b, &os0.wires, &os1.wires),
+            lookup_table: self.select_vec_ext(b, &os0.lookup_table, &os1.lookup_table),
             plonk_zs: self.select_vec_ext(b, &os0.plonk_zs, &os1.plonk_zs),
             plonk_zs_next: self.select_vec_ext(b, &os0.plonk_zs_next, &os1.plonk_zs_next),
             lookup_zs: self.select_vec_ext(b, &os0.lookup_zs, &os1.lookup_zs),

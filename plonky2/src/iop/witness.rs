@@ -123,6 +123,11 @@ pub trait WitnessWrite<F: Field> {
         C::Hasher: AlgebraicHasher<F>,
     {
         self.set_cap_target(&proof_target.wires_cap, &proof.wires_cap)?;
+        match (&proof_target.lookup_table_cap, &proof.lookup_table_cap) {
+            (Some(target), Some(cap)) => self.set_cap_target(target, cap)?,
+            (None, None) => {}
+            _ => return Err(anyhow!("lookup table commitment shape mismatch")),
+        }
         self.set_cap_target(
             &proof_target.plonk_zs_partial_products_cap,
             &proof.plonk_zs_partial_products_cap,
@@ -367,6 +372,13 @@ impl<'a, F: Field> PartitionWitness<'a, F> {
             *rep_value = Some(value);
             Ok(Some(rep_index))
         }
+    }
+
+    /// Replaces a partition value after witness generators have run. This is used for dynamic
+    /// lookup-table cells, whose placeholder gate generators establish shape but not values.
+    pub(crate) fn overwrite_target(&mut self, target: Target, value: F) {
+        let rep_index = self.representative_map[self.target_index(target)];
+        self.values[rep_index] = Some(value);
     }
 
     pub(crate) fn target_index(&self, target: Target) -> usize {

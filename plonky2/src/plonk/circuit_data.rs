@@ -46,7 +46,7 @@ use crate::plonk::circuit_builder::CircuitBuilder;
 use crate::plonk::config::{GenericConfig, Hasher};
 use crate::plonk::plonk_common::PlonkOracle;
 use crate::plonk::proof::{CompressedProofWithPublicInputs, ProofWithPublicInputs};
-use crate::plonk::prover::prove;
+use crate::plonk::prover::{prove, prove_with_dynamic_lookup_tables};
 use crate::plonk::verifier::verify;
 use crate::util::serialization::{
     Buffer, GateSerializer, IoResult, Read, WitnessGeneratorSerializer, Write,
@@ -217,6 +217,22 @@ impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>
             &self.prover_only,
             &self.common,
             inputs,
+            &mut TimingTree::default(),
+        )
+    }
+
+    /// Proves a circuit with runtime lookup tables. Each supplied table must match the
+    /// circuit-fixed length; static tables cannot be overridden.
+    pub fn prove_with_dynamic_lookup_tables(
+        &self,
+        inputs: PartialWitness<F>,
+        lookup_tables: &[LookupTable],
+    ) -> Result<ProofWithPublicInputs<F, C, D>> {
+        prove_with_dynamic_lookup_tables::<F, C, D>(
+            &self.prover_only,
+            &self.common,
+            inputs,
+            lookup_tables,
             &mut TimingTree::default(),
         )
     }
@@ -477,9 +493,22 @@ pub struct CommonCircuitData<F: RichField + Extendable<D>, const D: usize> {
 
     /// The stored lookup tables.
     pub luts: Vec<LookupTable>,
+    /// Per-table marker for tables whose entries are provided as witness data at proving time.
+    pub dynamic_luts: Vec<bool>,
 }
 
 impl<F: RichField + Extendable<D>, const D: usize> CommonCircuitData<F, D> {
+    const fn lookup_table_oracle_index(&self) -> usize {
+        2
+    }
+
+    const fn zs_oracle_index(&self) -> usize {
+        2 + (self.num_lookup_polys != 0) as usize
+    }
+
+    const fn quotient_oracle_index(&self) -> usize {
+        self.zs_oracle_index() + 1
+    }
     pub fn to_bytes(&self, gate_serializer: &dyn GateSerializer<F, D>) -> IoResult<Vec<u8>> {
         let mut buffer = Vec::new();
         buffer.write_common_circuit_data(self, gate_serializer)?;
@@ -602,7 +631,7 @@ impl<F: RichField + Extendable<D>, const D: usize> CommonCircuitData<F, D> {
     }
 
     fn fri_oracles(&self) -> Vec<FriOracleInfo> {
-        vec![
+        let mut oracles = vec![
             FriOracleInfo {
                 num_polys: self.num_preprocessed_polys(),
                 blinding: PlonkOracle::CONSTANTS_SIGMAS.blinding,
@@ -611,6 +640,14 @@ impl<F: RichField + Extendable<D>, const D: usize> CommonCircuitData<F, D> {
                 num_polys: self.config.num_wires,
                 blinding: PlonkOracle::WIRES.blinding,
             },
+        ];
+        if self.num_lookup_polys != 0 {
+            oracles.push(FriOracleInfo {
+                num_polys: self.config.num_wires,
+                blinding: PlonkOracle::LOOKUP_TABLE.blinding,
+            });
+        }
+        oracles.extend([
             FriOracleInfo {
                 num_polys: self.num_zs_partial_products_polys() + self.num_all_lookup_polys(),
                 blinding: PlonkOracle::ZS_PARTIAL_PRODUCTS.blinding,
@@ -619,7 +656,8 @@ impl<F: RichField + Extendable<D>, const D: usize> CommonCircuitData<F, D> {
                 num_polys: self.num_quotient_polys(),
                 blinding: PlonkOracle::QUOTIENT.blinding,
             },
-        ]
+        ]);
+        oracles
     }
 
     fn fri_preprocessed_polys(&self) -> Vec<FriPolynomialInfo> {
@@ -638,9 +676,20 @@ impl<F: RichField + Extendable<D>, const D: usize> CommonCircuitData<F, D> {
         FriPolynomialInfo::from_range(PlonkOracle::WIRES.index, 0..num_wire_polys)
     }
 
+    fn fri_lookup_table_polys(&self) -> Vec<FriPolynomialInfo> {
+        if self.num_lookup_polys == 0 {
+            vec![]
+        } else {
+            FriPolynomialInfo::from_range(
+                self.lookup_table_oracle_index(),
+                0..self.config.num_wires,
+            )
+        }
+    }
+
     fn fri_zs_partial_products_polys(&self) -> Vec<FriPolynomialInfo> {
         FriPolynomialInfo::from_range(
-            PlonkOracle::ZS_PARTIAL_PRODUCTS.index,
+            self.zs_oracle_index(),
             0..self.num_zs_partial_products_polys(),
         )
     }
@@ -654,7 +703,7 @@ impl<F: RichField + Extendable<D>, const D: usize> CommonCircuitData<F, D> {
         self.config.num_challenges * self.num_lookup_polys
     }
     fn fri_zs_polys(&self) -> Vec<FriPolynomialInfo> {
-        FriPolynomialInfo::from_range(PlonkOracle::ZS_PARTIAL_PRODUCTS.index, self.zs_range())
+        FriPolynomialInfo::from_range(self.zs_oracle_index(), self.zs_range())
     }
 
     /// Returns polynomials that require evaluation at `zeta` and `g * zeta`.
@@ -663,13 +712,13 @@ impl<F: RichField + Extendable<D>, const D: usize> CommonCircuitData<F, D> {
     }
 
     fn fri_quotient_polys(&self) -> Vec<FriPolynomialInfo> {
-        FriPolynomialInfo::from_range(PlonkOracle::QUOTIENT.index, 0..self.num_quotient_polys())
+        FriPolynomialInfo::from_range(self.quotient_oracle_index(), 0..self.num_quotient_polys())
     }
 
     /// Returns the information for lookup polynomials, i.e. the index within the oracle and the indices of the polynomials within the commitment.
     fn fri_lookup_polys(&self) -> Vec<FriPolynomialInfo> {
         FriPolynomialInfo::from_range(
-            PlonkOracle::ZS_PARTIAL_PRODUCTS.index,
+            self.zs_oracle_index(),
             self.num_zs_partial_products_polys()
                 ..self.num_zs_partial_products_polys() + self.num_all_lookup_polys(),
         )
@@ -682,6 +731,7 @@ impl<F: RichField + Extendable<D>, const D: usize> CommonCircuitData<F, D> {
         [
             self.fri_preprocessed_polys(),
             self.fri_wire_polys(),
+            self.fri_lookup_table_polys(),
             self.fri_zs_partial_products_polys(),
             self.fri_quotient_polys(),
             self.fri_lookup_polys(),

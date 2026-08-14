@@ -195,6 +195,8 @@ pub struct CircuitBuilder<F: RichField + Extendable<D>, const D: usize> {
 
     // Lookup tables in the form of `Vec<(input_value, output_value)>`.
     luts: Vec<LookupTable>,
+    /// Whether each LUT is supplied at proving time instead of fixed in `CommonCircuitData`.
+    pub(crate) dynamic_luts: Vec<bool>,
 
     /// Optional common data. When it is `Some(goal_data)`, the `build` function panics if the resulting
     /// common data doesn't equal `goal_data`.
@@ -232,6 +234,7 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
             lookup_rows: Vec::new(),
             lut_to_lookups: Vec::new(),
             luts: Vec::new(),
+            dynamic_luts: Vec::new(),
             goal_common_data: None,
             verifier_data_public_input: None,
         };
@@ -767,6 +770,7 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
             idx
         } else {
             self.luts.push(lut);
+            self.dynamic_luts.push(false);
             self.lut_to_lookups.push(vec![]);
             assert!(self.luts.len() == self.lut_to_lookups.len());
             self.luts.len() - 1
@@ -793,6 +797,7 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
             idx
         } else {
             self.luts.push(lut);
+            self.dynamic_luts.push(false);
             self.lut_to_lookups.push(vec![]);
             assert!(self.luts.len() == self.lut_to_lookups.len());
             self.luts.len() - 1
@@ -806,10 +811,27 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
             idx
         } else {
             self.luts.push(table);
+            self.dynamic_luts.push(false);
             self.lut_to_lookups.push(vec![]);
             assert!(self.luts.len() == self.lut_to_lookups.len());
             self.luts.len() - 1
         }
+    }
+
+    /// Adds a lookup table whose values are supplied to `prove_with_dynamic_lookup_tables`.
+    /// The table length is part of the circuit shape, while its entries are witness data.
+    pub fn update_dynamic_lut(&mut self, table_len: usize) -> usize {
+        assert!(table_len > 0, "dynamic lookup tables cannot be empty");
+        assert!(table_len <= u16::MAX as usize + 1);
+        let placeholder = Arc::new(
+            (0..table_len)
+                .map(|input| (input as u16, input as u16))
+                .collect(),
+        );
+        self.luts.push(placeholder);
+        self.dynamic_luts.push(true);
+        self.lut_to_lookups.push(vec![]);
+        self.luts.len() - 1
     }
 
     /// Find an available slot, of the form `(row, op)` for gate `G` using parameters `params`
@@ -1304,6 +1326,8 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
             domain_separator_digest.to_vec(),
             vec![
                 F::from_canonical_usize(degree_bits),
+                F::from_canonical_usize(self.dynamic_luts.len()),
+                F::from_bool(self.dynamic_luts.iter().any(|&dynamic| dynamic)),
                 /* Add other circuit data here */
             ],
         ];
@@ -1323,6 +1347,7 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
             num_lookup_polys,
             num_lookup_selectors,
             luts: self.luts,
+            dynamic_luts: self.dynamic_luts,
         };
 
         let mut success = true;

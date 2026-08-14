@@ -126,6 +126,55 @@ fn test_one_lookup() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[test]
+fn test_dynamic_lookup_table_commitment_is_separate() -> anyhow::Result<()> {
+    init_logger();
+
+    let config = CircuitConfig::standard_recursion_config();
+    let mut builder = CircuitBuilder::<F, D>::new(config);
+    let input = builder.add_virtual_target();
+    let output = builder.add_virtual_target();
+    let table_index = builder.add_dynamic_lookup_table(8);
+    builder.add_dynamic_lookup(input, output, table_index);
+    builder.register_public_input(input);
+    builder.register_public_input(output);
+
+    let data = builder.build::<C>();
+    let table: LookupTable = Arc::new((0..8).map(|i| (i, i)).collect());
+
+    let prove_for = |input_value: u16| {
+        let mut pw = PartialWitness::new();
+        pw.set_target(input, F::from_canonical_u16(input_value))?;
+        data.prove_with_dynamic_lookup_tables(pw, core::slice::from_ref(&table))
+    };
+
+    let proof_a = prove_for(2)?;
+    let proof_b = prove_for(5)?;
+    data.verify(proof_a.clone()).expect("proof A");
+    data.verify(proof_b.clone()).expect("proof B");
+    assert_ne!(proof_a.proof.wires_cap, proof_b.proof.wires_cap);
+    assert_eq!(
+        proof_a.proof.lookup_table_cap,
+        proof_b.proof.lookup_table_cap
+    );
+
+    let changed_table: LookupTable = Arc::new(
+        (0..8)
+            .map(|i| if i == 7 { (i, 6) } else { (i, i) })
+            .collect(),
+    );
+    let mut pw = PartialWitness::new();
+    pw.set_target(input, F::from_canonical_u16(2))?;
+    let proof_c = data.prove_with_dynamic_lookup_tables(pw, &[changed_table])?;
+    data.verify(proof_c.clone()).expect("proof C");
+    assert_ne!(
+        proof_a.proof.lookup_table_cap,
+        proof_c.proof.lookup_table_cap
+    );
+
+    Ok(())
+}
+
 // Tests one lookup in two different lookup tables.
 #[test]
 fn test_two_luts() -> anyhow::Result<()> {
