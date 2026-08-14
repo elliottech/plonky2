@@ -478,7 +478,7 @@ fn reduce_gate_constraints_base_batch<F: Field>(
         if res_out_is_zero_seed {
             match rows.next() {
                 Some(first_row) => {
-                    for (&term, result) in first_row.iter().zip(res_out.chunks_exact_mut(2)) {
+                    for (&term, result) in first_row.iter().zip(res_out.as_chunks_mut::<2>().0) {
                         result[0] = term;
                         result[1] = term;
                     }
@@ -487,7 +487,7 @@ fn reduce_gate_constraints_base_batch<F: Field>(
             }
         }
         for constraint_row in rows {
-            for (&term, result) in constraint_row.iter().zip(res_out.chunks_exact_mut(2)) {
+            for (&term, result) in constraint_row.iter().zip(res_out.as_chunks_mut::<2>().0) {
                 result[0] = term.multiply_accumulate(result[0], alpha_0);
                 result[1] = term.multiply_accumulate(result[1], alpha_1);
             }
@@ -1336,6 +1336,7 @@ pub fn evaluate_gate_constraints<F: RichField + Extendable<D>, const D: usize>(
 /// Returns a vector of `num_gate_constraints * vars_batch.len()` field elements. The constraints
 /// corresponding to `vars_batch[i]` are found in `result[i], result[vars_batch.len() + i],
 /// result[2 * vars_batch.len() + i], ...`.
+#[allow(dead_code)]
 pub fn evaluate_gate_constraints_base_batch<F: RichField + Extendable<D>, const D: usize>(
     common_data: &CommonCircuitData<F, D>,
     vars_batch: EvaluationVarsBaseBatch<F>,
@@ -1724,6 +1725,217 @@ pub(crate) fn eval_vanishing_poly_circuit<F: RichField + Extendable<D>, const D:
         .collect()
 }
 
+/// Same as `check_lookup_constraints`, but for the recursive case.
+pub fn check_lookup_constraints_circuit<F: RichField + Extendable<D>, const D: usize>(
+    builder: &mut CircuitBuilder<F, D>,
+    common_data: &CommonCircuitData<F, D>,
+    vars: EvaluationTargets<D>,
+    local_lookup_zs: &[ExtensionTarget<D>],
+    next_lookup_zs: &[ExtensionTarget<D>],
+    lookup_selectors: &[ExtensionTarget<D>],
+    deltas: &[Target],
+) -> Vec<ExtensionTarget<D>> {
+    let num_lu_slots = LookupGate::num_slots(&common_data.config);
+    let num_lut_slots = LookupTableGate::num_slots(&common_data.config);
+    let lu_degree = common_data.quotient_degree_factor - 1;
+    let num_sldc_polys = local_lookup_zs.len() - 1;
+    let lut_degree = num_lut_slots.div_ceil(num_sldc_polys);
+
+    let mut constraints = Vec::with_capacity(4 + common_data.luts.len() + 2 * num_sldc_polys);
+
+    // RE is the first polynomial stored.
+    let z_re = local_lookup_zs[0];
+    let next_z_re = next_lookup_zs[0];
+
+    // Partial Sums and LDCs (i.e. the SLDC polynomials) are stored in the remaining polynomials.
+    let z_x_lookup_sldcs = &local_lookup_zs[1..num_sldc_polys + 1];
+    let z_gx_lookup_sldcs = &next_lookup_zs[1..num_sldc_polys + 1];
+
+    // Convert deltas to ExtensionTargets.
+    let ext_deltas = deltas
+        .iter()
+        .map(|d| builder.convert_to_ext(*d))
+        .collect::<Vec<_>>();
+
+    // Computing all current looked and looking combos, i.e. the combos we need for the SLDC polynomials.
+    let current_looked_combos = (0..num_lut_slots)
+        .map(|s| {
+            let input_wire = vars.local_wires[LookupTableGate::wire_ith_looked_inp(s)];
+            let output_wire = vars.local_wires[LookupTableGate::wire_ith_looked_out(s)];
+            builder.mul_add_extension(
+                ext_deltas[LookupChallenges::ChallengeA as usize],
+                output_wire,
+                input_wire,
+            )
+        })
+        .collect::<Vec<_>>();
+    let current_looking_combos = (0..num_lu_slots)
+        .map(|s| {
+            let input_wire = vars.local_wires[LookupGate::wire_ith_looking_inp(s)];
+            let output_wire = vars.local_wires[LookupGate::wire_ith_looking_out(s)];
+            builder.mul_add_extension(
+                ext_deltas[LookupChallenges::ChallengeA as usize],
+                output_wire,
+                input_wire,
+            )
+        })
+        .collect::<Vec<_>>();
+
+    let current_lut_subs = (0..num_lut_slots)
+        .map(|s| {
+            builder.sub_extension(
+                ext_deltas[LookupChallenges::ChallengeAlpha as usize],
+                current_looked_combos[s],
+            )
+        })
+        .collect::<Vec<_>>();
+
+    let current_lu_subs = (0..num_lu_slots)
+        .map(|s| {
+            builder.sub_extension(
+                ext_deltas[LookupChallenges::ChallengeAlpha as usize],
+                current_looking_combos[s],
+            )
+        })
+        .collect::<Vec<_>>();
+
+    // Computing all current lookup combos, i.e. the combos used to check that the LUT is correct.
+    let current_lookup_combos = (0..num_lut_slots)
+        .map(|s| {
+            let input_wire = vars.local_wires[LookupTableGate::wire_ith_looked_inp(s)];
+            let output_wire = vars.local_wires[LookupTableGate::wire_ith_looked_out(s)];
+            builder.mul_add_extension(
+                ext_deltas[LookupChallenges::ChallengeB as usize],
+                output_wire,
+                input_wire,
+            )
+        })
+        .collect::<Vec<_>>();
+
+    // Check last LDC constraint.
+    constraints.push(builder.mul_extension(
+        lookup_selectors[LookupSelectors::LastLdc as usize],
+        z_x_lookup_sldcs[num_sldc_polys - 1],
+    ));
+
+    // Check initial Sum constraint.
+    constraints.push(builder.mul_extension(
+        lookup_selectors[LookupSelectors::InitSre as usize],
+        z_x_lookup_sldcs[0],
+    ));
+
+    // Check initial RE constraint.
+    constraints
+        .push(builder.mul_extension(lookup_selectors[LookupSelectors::InitSre as usize], z_re));
+
+    // Check final RE constraints for each different LUT.
+    for r in LookupSelectors::StartEnd as usize..common_data.num_lookup_selectors {
+        let cur_ends_selectors = lookup_selectors[r];
+        let lut_row_number = common_data.luts[r - LookupSelectors::StartEnd as usize]
+            .len()
+            .div_ceil(num_lut_slots);
+        let cur_function_eval = get_lut_poly_circuit(
+            builder,
+            common_data,
+            r - LookupSelectors::StartEnd as usize,
+            deltas,
+            num_lut_slots * lut_row_number,
+        );
+        let cur_function_eval_ext = builder.convert_to_ext(cur_function_eval);
+
+        let cur_re = builder.sub_extension(z_re, cur_function_eval_ext);
+        constraints.push(builder.mul_extension(cur_ends_selectors, cur_re));
+    }
+
+    // Check RE row transition constraint.
+    let mut cur_sum = next_z_re;
+    for elt in &current_lookup_combos {
+        cur_sum = builder.mul_add_extension(
+            cur_sum,
+            ext_deltas[LookupChallenges::ChallengeDelta as usize],
+            *elt,
+        );
+    }
+    let unfiltered_re_line = builder.sub_extension(z_re, cur_sum);
+
+    constraints.push(builder.mul_extension(
+        lookup_selectors[LookupSelectors::TransSre as usize],
+        unfiltered_re_line,
+    ));
+
+    for poly in 0..num_sldc_polys {
+        // Compute prod(alpha - combo) for the current slot for Sum.
+        let mut lut_prod = builder.one_extension();
+        for i in poly * lut_degree..min((poly + 1) * lut_degree, num_lut_slots) {
+            lut_prod = builder.mul_extension(lut_prod, current_lut_subs[i]);
+        }
+
+        // Compute prod(alpha - combo) for the current slot for LDC.
+        let mut lu_prod = builder.one_extension();
+        for i in poly * lu_degree..min((poly + 1) * lu_degree, num_lu_slots) {
+            lu_prod = builder.mul_extension(lu_prod, current_lu_subs[i]);
+        }
+
+        let one = builder.one_extension();
+        let zero = builder.zero_extension();
+
+        // Compute sum_i(prod_{j!=i}(alpha - combo_j)) for LDC.
+        let lu_sum_prods =
+            (poly * lu_degree..min((poly + 1) * lu_degree, num_lu_slots)).fold(zero, |acc, i| {
+                let mut prod_i = one;
+
+                for j in poly * lu_degree..min((poly + 1) * lu_degree, num_lu_slots) {
+                    if j != i {
+                        prod_i = builder.mul_extension(prod_i, current_lu_subs[j]);
+                    }
+                }
+                builder.add_extension(acc, prod_i)
+            });
+
+        // Compute sum_i(mul_i.prod_{j!=i}(alpha - combo_j)) for Sum.
+        let lut_sum_prods_mul = (poly * lut_degree..min((poly + 1) * lut_degree, num_lut_slots))
+            .fold(zero, |acc, i| {
+                let mut prod_i = one;
+
+                for j in poly * lut_degree..min((poly + 1) * lut_degree, num_lut_slots) {
+                    if j != i {
+                        prod_i = builder.mul_extension(prod_i, current_lut_subs[j]);
+                    }
+                }
+                builder.mul_add_extension(
+                    prod_i,
+                    vars.local_wires[LookupTableGate::wire_ith_multiplicity(i)],
+                    acc,
+                )
+            });
+
+        // The previous element is the previous poly of the current row or the last poly of the next row.
+        let prev = if poly == 0 {
+            z_gx_lookup_sldcs[num_sldc_polys - 1]
+        } else {
+            z_x_lookup_sldcs[poly - 1]
+        };
+
+        let cur_sub = builder.sub_extension(z_x_lookup_sldcs[poly], prev);
+
+        // Check sum row and col transitions. It's the same constraint, with a row transition happening for slot == 0.
+        let unfiltered_sum_transition =
+            builder.mul_sub_extension(lut_prod, cur_sub, lut_sum_prods_mul);
+        constraints.push(builder.mul_extension(
+            lookup_selectors[LookupSelectors::TransSre as usize],
+            unfiltered_sum_transition,
+        ));
+
+        // Check ldc row and col transitions. It's the same constraint, with a row transition happening for slot == 0.
+        let unfiltered_ldc_transition = builder.mul_add_extension(lu_prod, cur_sub, lu_sum_prods);
+        constraints.push(builder.mul_extension(
+            lookup_selectors[LookupSelectors::TransLdc as usize],
+            unfiltered_ldc_transition,
+        ));
+    }
+    constraints
+}
+
 #[cfg(test)]
 mod tests {
     use plonky2_field::goldilocks_field::GoldilocksField;
@@ -1988,215 +2200,4 @@ mod tests {
             }
         }
     }
-}
-
-/// Same as `check_lookup_constraints`, but for the recursive case.
-pub fn check_lookup_constraints_circuit<F: RichField + Extendable<D>, const D: usize>(
-    builder: &mut CircuitBuilder<F, D>,
-    common_data: &CommonCircuitData<F, D>,
-    vars: EvaluationTargets<D>,
-    local_lookup_zs: &[ExtensionTarget<D>],
-    next_lookup_zs: &[ExtensionTarget<D>],
-    lookup_selectors: &[ExtensionTarget<D>],
-    deltas: &[Target],
-) -> Vec<ExtensionTarget<D>> {
-    let num_lu_slots = LookupGate::num_slots(&common_data.config);
-    let num_lut_slots = LookupTableGate::num_slots(&common_data.config);
-    let lu_degree = common_data.quotient_degree_factor - 1;
-    let num_sldc_polys = local_lookup_zs.len() - 1;
-    let lut_degree = num_lut_slots.div_ceil(num_sldc_polys);
-
-    let mut constraints = Vec::with_capacity(4 + common_data.luts.len() + 2 * num_sldc_polys);
-
-    // RE is the first polynomial stored.
-    let z_re = local_lookup_zs[0];
-    let next_z_re = next_lookup_zs[0];
-
-    // Partial Sums and LDCs (i.e. the SLDC polynomials) are stored in the remaining polynomials.
-    let z_x_lookup_sldcs = &local_lookup_zs[1..num_sldc_polys + 1];
-    let z_gx_lookup_sldcs = &next_lookup_zs[1..num_sldc_polys + 1];
-
-    // Convert deltas to ExtensionTargets.
-    let ext_deltas = deltas
-        .iter()
-        .map(|d| builder.convert_to_ext(*d))
-        .collect::<Vec<_>>();
-
-    // Computing all current looked and looking combos, i.e. the combos we need for the SLDC polynomials.
-    let current_looked_combos = (0..num_lut_slots)
-        .map(|s| {
-            let input_wire = vars.local_wires[LookupTableGate::wire_ith_looked_inp(s)];
-            let output_wire = vars.local_wires[LookupTableGate::wire_ith_looked_out(s)];
-            builder.mul_add_extension(
-                ext_deltas[LookupChallenges::ChallengeA as usize],
-                output_wire,
-                input_wire,
-            )
-        })
-        .collect::<Vec<_>>();
-    let current_looking_combos = (0..num_lu_slots)
-        .map(|s| {
-            let input_wire = vars.local_wires[LookupGate::wire_ith_looking_inp(s)];
-            let output_wire = vars.local_wires[LookupGate::wire_ith_looking_out(s)];
-            builder.mul_add_extension(
-                ext_deltas[LookupChallenges::ChallengeA as usize],
-                output_wire,
-                input_wire,
-            )
-        })
-        .collect::<Vec<_>>();
-
-    let current_lut_subs = (0..num_lut_slots)
-        .map(|s| {
-            builder.sub_extension(
-                ext_deltas[LookupChallenges::ChallengeAlpha as usize],
-                current_looked_combos[s],
-            )
-        })
-        .collect::<Vec<_>>();
-
-    let current_lu_subs = (0..num_lu_slots)
-        .map(|s| {
-            builder.sub_extension(
-                ext_deltas[LookupChallenges::ChallengeAlpha as usize],
-                current_looking_combos[s],
-            )
-        })
-        .collect::<Vec<_>>();
-
-    // Computing all current lookup combos, i.e. the combos used to check that the LUT is correct.
-    let current_lookup_combos = (0..num_lut_slots)
-        .map(|s| {
-            let input_wire = vars.local_wires[LookupTableGate::wire_ith_looked_inp(s)];
-            let output_wire = vars.local_wires[LookupTableGate::wire_ith_looked_out(s)];
-            builder.mul_add_extension(
-                ext_deltas[LookupChallenges::ChallengeB as usize],
-                output_wire,
-                input_wire,
-            )
-        })
-        .collect::<Vec<_>>();
-
-    // Check last LDC constraint.
-    constraints.push(builder.mul_extension(
-        lookup_selectors[LookupSelectors::LastLdc as usize],
-        z_x_lookup_sldcs[num_sldc_polys - 1],
-    ));
-
-    // Check initial Sum constraint.
-    constraints.push(builder.mul_extension(
-        lookup_selectors[LookupSelectors::InitSre as usize],
-        z_x_lookup_sldcs[0],
-    ));
-
-    // Check initial RE constraint.
-    constraints
-        .push(builder.mul_extension(lookup_selectors[LookupSelectors::InitSre as usize], z_re));
-
-    // Check final RE constraints for each different LUT.
-    for r in LookupSelectors::StartEnd as usize..common_data.num_lookup_selectors {
-        let cur_ends_selectors = lookup_selectors[r];
-        let lut_row_number = common_data.luts[r - LookupSelectors::StartEnd as usize]
-            .len()
-            .div_ceil(num_lut_slots);
-        let cur_function_eval = get_lut_poly_circuit(
-            builder,
-            common_data,
-            r - LookupSelectors::StartEnd as usize,
-            deltas,
-            num_lut_slots * lut_row_number,
-        );
-        let cur_function_eval_ext = builder.convert_to_ext(cur_function_eval);
-
-        let cur_re = builder.sub_extension(z_re, cur_function_eval_ext);
-        constraints.push(builder.mul_extension(cur_ends_selectors, cur_re));
-    }
-
-    // Check RE row transition constraint.
-    let mut cur_sum = next_z_re;
-    for elt in &current_lookup_combos {
-        cur_sum = builder.mul_add_extension(
-            cur_sum,
-            ext_deltas[LookupChallenges::ChallengeDelta as usize],
-            *elt,
-        );
-    }
-    let unfiltered_re_line = builder.sub_extension(z_re, cur_sum);
-
-    constraints.push(builder.mul_extension(
-        lookup_selectors[LookupSelectors::TransSre as usize],
-        unfiltered_re_line,
-    ));
-
-    for poly in 0..num_sldc_polys {
-        // Compute prod(alpha - combo) for the current slot for Sum.
-        let mut lut_prod = builder.one_extension();
-        for i in poly * lut_degree..min((poly + 1) * lut_degree, num_lut_slots) {
-            lut_prod = builder.mul_extension(lut_prod, current_lut_subs[i]);
-        }
-
-        // Compute prod(alpha - combo) for the current slot for LDC.
-        let mut lu_prod = builder.one_extension();
-        for i in poly * lu_degree..min((poly + 1) * lu_degree, num_lu_slots) {
-            lu_prod = builder.mul_extension(lu_prod, current_lu_subs[i]);
-        }
-
-        let one = builder.one_extension();
-        let zero = builder.zero_extension();
-
-        // Compute sum_i(prod_{j!=i}(alpha - combo_j)) for LDC.
-        let lu_sum_prods =
-            (poly * lu_degree..min((poly + 1) * lu_degree, num_lu_slots)).fold(zero, |acc, i| {
-                let mut prod_i = one;
-
-                for j in poly * lu_degree..min((poly + 1) * lu_degree, num_lu_slots) {
-                    if j != i {
-                        prod_i = builder.mul_extension(prod_i, current_lu_subs[j]);
-                    }
-                }
-                builder.add_extension(acc, prod_i)
-            });
-
-        // Compute sum_i(mul_i.prod_{j!=i}(alpha - combo_j)) for Sum.
-        let lut_sum_prods_mul = (poly * lut_degree..min((poly + 1) * lut_degree, num_lut_slots))
-            .fold(zero, |acc, i| {
-                let mut prod_i = one;
-
-                for j in poly * lut_degree..min((poly + 1) * lut_degree, num_lut_slots) {
-                    if j != i {
-                        prod_i = builder.mul_extension(prod_i, current_lut_subs[j]);
-                    }
-                }
-                builder.mul_add_extension(
-                    prod_i,
-                    vars.local_wires[LookupTableGate::wire_ith_multiplicity(i)],
-                    acc,
-                )
-            });
-
-        // The previous element is the previous poly of the current row or the last poly of the next row.
-        let prev = if poly == 0 {
-            z_gx_lookup_sldcs[num_sldc_polys - 1]
-        } else {
-            z_x_lookup_sldcs[poly - 1]
-        };
-
-        let cur_sub = builder.sub_extension(z_x_lookup_sldcs[poly], prev);
-
-        // Check sum row and col transitions. It's the same constraint, with a row transition happening for slot == 0.
-        let unfiltered_sum_transition =
-            builder.mul_sub_extension(lut_prod, cur_sub, lut_sum_prods_mul);
-        constraints.push(builder.mul_extension(
-            lookup_selectors[LookupSelectors::TransSre as usize],
-            unfiltered_sum_transition,
-        ));
-
-        // Check ldc row and col transitions. It's the same constraint, with a row transition happening for slot == 0.
-        let unfiltered_ldc_transition = builder.mul_add_extension(lu_prod, cur_sub, lu_sum_prods);
-        constraints.push(builder.mul_extension(
-            lookup_selectors[LookupSelectors::TransLdc as usize],
-            unfiltered_ldc_transition,
-        ));
-    }
-    constraints
 }

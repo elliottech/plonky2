@@ -163,7 +163,7 @@ impl<T> DigestStore<T> {
 
 impl<T: PartialEq> PartialEq for DigestStore<T> {
     fn eq(&self, other: &Self) -> bool {
-        &**self == &**other
+        **self == **other
     }
 }
 

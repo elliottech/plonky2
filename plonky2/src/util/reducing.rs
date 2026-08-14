@@ -566,6 +566,7 @@ mod tests {
         type FF = <C as GenericConfig<D>>::FE;
 
         // Reference: the pre-change body, verbatim.
+        #[allow(unused_assignments)]
         fn legacy(alpha: FF, lens: &[usize], polys: &[PolynomialCoeffs<F>]) -> Vec<FF> {
             let mut rf = ReducingFactor::new(alpha);
             let mut acc: Vec<FF> = Vec::new();

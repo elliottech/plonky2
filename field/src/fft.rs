@@ -1748,7 +1748,7 @@ pub mod lab {
         omega_r: &[P],
         omega_r1: &[P],
     ) {
-        debug_assert!(nonzero_len >= 4 && nonzero_len % 4 == 0);
+        debug_assert!(nonzero_len >= 4 && nonzero_len.is_multiple_of(4));
         let pr = packed_repeat;
         for quad in (0..nonzero_len / 4).rev() {
             let source = source_start + quad * 4;
@@ -1794,7 +1794,7 @@ pub mod lab {
         destination: usize,
         omega4: &[WideGoldilocksField],
     ) {
-        debug_assert!(nonzero_len >= 4 && nonzero_len % 4 == 0);
+        debug_assert!(nonzero_len >= 4 && nonzero_len.is_multiple_of(4));
         debug_assert!(omega4.len() >= 4);
         for quad in (0..nonzero_len / 4).rev() {
             let source = source_start + quad * 4;
@@ -2279,6 +2279,7 @@ pub mod lab {
     /// Variant-B cache-blocked expansion: production structure, but the
     /// aarch64 rate-8 fast path premultiplies by sigma (the folded row-r
     /// shift factor) instead of reading the (already folded) row.
+    #[cfg_attr(not(target_arch = "aarch64"), allow(unused_variables))]
     fn cache_blocks_coset<P: PackedField>(
         values: &mut [P::Scalar],
         r: usize,
@@ -2426,7 +2427,7 @@ pub mod lab {
         omega4: &[WideGoldilocksField],
         sigma: crate::goldilocks_field::GoldilocksField,
     ) {
-        debug_assert!(nonzero_len >= 4 && nonzero_len % 4 == 0);
+        debug_assert!(nonzero_len >= 4 && nonzero_len.is_multiple_of(4));
         debug_assert!(omega4.len() >= 4);
         for quad in (0..nonzero_len / 4).rev() {
             let source = source_start + quad * 4;
@@ -2457,6 +2458,7 @@ pub mod lab {
 
     /// Folded-table cache blocks with the A1 fused expand+two-layers kernel
     /// and the production pair-fused schedule for the remaining layers.
+    #[cfg_attr(not(target_arch = "aarch64"), allow(unused_variables))]
     fn cache_blocks_folded_a1<P: PackedField>(
         values: &mut [P::Scalar],
         r: usize,

@@ -549,6 +549,10 @@ impl GeneratorWatchIndex {
         self.entries
     }
 
+    pub const fn is_empty(&self) -> bool {
+        self.entries == 0
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = (usize, &[usize])> {
         self.offsets
             .windows(2)

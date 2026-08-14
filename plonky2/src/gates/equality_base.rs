@@ -522,8 +522,10 @@ mod tests {
         let mut expected = vec![F::ZERO; num_constraints * N];
         let materialized = <EqualityGate as Gate<F, D>>::eval_unfiltered_base_batch(&gate, vars);
         for (acc, constraints) in expected
-            .chunks_exact_mut(N)
-            .zip(materialized.chunks_exact(N))
+            .as_chunks_mut::<N>()
+            .0
+            .iter_mut()
+            .zip(materialized.as_chunks::<N>().0.iter())
         {
             crate::field::batch_util::batch_multiply_add_inplace(acc, constraints, &filters);
         }

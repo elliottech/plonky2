@@ -498,6 +498,7 @@ impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>
     /// column's contribution is a contiguous LDE prefix, so the strided map
     /// collapses to a per-column memcpy. Columns are independent and fan
     /// across the pool; the `step > 1` path is unchanged.
+    #[allow(clippy::uninit_vec)]
     pub fn extract_lde_batch_columns(
         &self,
         step: usize,
@@ -1030,7 +1031,7 @@ mod tests {
         fn raw(values: &[F]) -> Vec<u64> {
             values
                 .iter()
-                .flat_map(|x| FieldExtension::<2>::to_basefield_array(x))
+                .flat_map(FieldExtension::<2>::to_basefield_array)
                 .map(|c: GoldilocksField| c.to_noncanonical_u64())
                 .collect()
         }

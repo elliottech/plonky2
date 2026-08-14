@@ -17,6 +17,7 @@ use crate::field::zero_poly_coset::ZeroPolyOnCoset;
 use crate::fri::oracle::{BatchLayout, PolynomialBatch};
 use crate::gates::lookup::LookupGate;
 use crate::gates::lookup_table::LookupTableGate;
+#[cfg(all(feature = "std", target_arch = "aarch64", target_os = "macos"))]
 use crate::gates::poseidon2::Poseidon2Gate;
 use crate::gates::selectors::LookupSelectors;
 use crate::hash::hash_types::RichField;
@@ -1783,6 +1784,7 @@ fn start_gpu_permutation_quotient<
     Some(job)
 }
 
+#[allow(clippy::uninit_vec)]
 fn compute_quotient_polys<
     'a,
     F: RichField + Extendable<D>,
@@ -2541,7 +2543,6 @@ pub(crate) mod precomputed {
             if let Some(hit) = map.read().unwrap().get(&key) {
                 return Arc::clone(hit)
                     .downcast::<Vec<F>>()
-                    .ok()
                     .expect("type-keyed cache entry has the keyed type");
             }
             let computed: Arc<Vec<F>> = Arc::new(compute());
@@ -2553,7 +2554,6 @@ pub(crate) mod precomputed {
                 .or_insert_with(|| computed as Arc<dyn Any + Send + Sync>);
             Arc::clone(entry)
                 .downcast::<Vec<F>>()
-                .ok()
                 .expect("type-keyed cache entry has the keyed type")
         }
 
@@ -3024,6 +3024,7 @@ mod l_0_table_cache {
 
     /// Keyed by field type and `(degree_bits, quotient_degree_bits)`; the coset shift is a
     /// constant of the field type.
+    #[allow(clippy::type_complexity)]
     static CACHE: OnceLock<Mutex<HashMap<(TypeId, usize, usize), Arc<dyn Any + Send + Sync>>>> =
         OnceLock::new();
 
@@ -3151,7 +3152,6 @@ mod flat_chunk_products_tests {
         let num_routed_wires = 80usize;
         let degree = 8usize;
         let num_chunks = num_routed_wires.div_ceil(degree);
-        let num_prods = num_chunks - 1;
 
         for &n_points in &[1usize, 5, 128, 300] {
             let points: Vec<Vec<F>> = (0..n_points)
@@ -3455,9 +3455,11 @@ mod permutation_pairing_tests {
         assert_eq!(data.common.k_is.len(), num_routed_wires);
 
         // Point counts spanning: a single point, a short first batch, the
-        // inversion batch boundary (INV_BATCH = 128) exactly, one past it, and
-        // several batches with a short tail.
-        for &n_points in &[1usize, 5, 127, 128, 129, 300] {
+        // inversion batch boundary (INV_BATCH = 128) exactly, and several
+        // batches. Sizes are powers of two because both shipping paths build
+        // `PolynomialValues` over the injected subgroup, whose length is
+        // checked under debug assertions.
+        for &n_points in &[1usize, 4, 128, 256, 512] {
             let mut rng = Rng::new(0x9e37_79b9_7f4a_7c15 ^ ((n_points as u64) << 8));
 
             let subgroup: Vec<F> = (0..n_points).map(|_| rng.next_field()).collect();

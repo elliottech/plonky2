@@ -22,8 +22,7 @@ use crate::iop::witness::{PartitionWitness, Witness, WitnessWrite};
 use crate::plonk::circuit_builder::CircuitBuilder;
 use crate::plonk::circuit_data::CommonCircuitData;
 use crate::plonk::vars::{
-    EvaluationTargets, EvaluationVars, EvaluationVarsBase, EvaluationVarsBaseBatch,
-    EvaluationVarsBasePacked,
+    EvaluationTargets, EvaluationVars, EvaluationVarsBase, EvaluationVarsBasePacked,
 };
 use crate::util::serialization::{Buffer, IoResult, Read, Write};
 
@@ -843,6 +842,7 @@ mod tests {
     use crate::iop::witness::PartialWitness;
     use crate::plonk::circuit_data::CircuitConfig;
     use crate::plonk::config::{GenericConfig, Poseidon2GoldilocksConfig};
+    use crate::plonk::vars::EvaluationVarsBaseBatch;
 
     #[test]
     fn wire_indices() {
@@ -960,8 +960,10 @@ mod tests {
         let mut expected = vec![F::ZERO; gate.num_constraints() * N];
         let materialized = gate.eval_unfiltered_base_batch(vars);
         for (acc, constraints) in expected
-            .chunks_exact_mut(N)
-            .zip(materialized.chunks_exact(N))
+            .as_chunks_mut::<N>()
+            .0
+            .iter_mut()
+            .zip(materialized.as_chunks::<N>().0.iter())
         {
             crate::field::batch_util::batch_multiply_add_inplace(acc, constraints, &filters);
         }

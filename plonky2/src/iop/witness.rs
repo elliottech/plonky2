@@ -347,6 +347,7 @@ pub struct PartitionWitness<'a, F: Field> {
 }
 
 impl<'a, F: Field> PartitionWitness<'a, F> {
+    #[allow(clippy::uninit_vec)]
     pub fn new(num_wires: usize, degree: usize, representative_map: &'a [u32]) -> Self {
         let len = representative_map.len();
         // `values` is left uninitialized: `F` has no `IsZero` specialization,

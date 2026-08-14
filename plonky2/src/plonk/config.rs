@@ -131,6 +131,7 @@ pub trait Hasher<F: RichField>: Sized + Copy + Debug + Eq + PartialEq {
     /// `leaves` is one flat row-major buffer holding `num_leaves` leaves of `leaf_width`
     /// field elements each. The first result uses the level-order
     /// [`crate::hash::merkle_tree::LevelOrderDigests`] layout.
+    #[allow(clippy::type_complexity)]
     fn try_build_merkle_tree(
         _leaves: &[F],
         _leaf_width: usize,
@@ -146,6 +147,7 @@ pub trait Hasher<F: RichField>: Sized + Copy + Debug + Eq + PartialEq {
     /// Like [`Hasher::try_build_merkle_tree`], but the leaves arrive as
     /// natural-order poly-major columns: tree leaf `i` is
     /// `columns[j][reverse_bits(i, log2(num_leaves))]`.
+    #[allow(clippy::type_complexity)]
     fn try_build_merkle_tree_columns(
         _columns: &[Vec<F>],
         _cap_height: usize,
@@ -170,6 +172,7 @@ pub trait Hasher<F: RichField>: Sized + Copy + Debug + Eq + PartialEq {
     /// Like [`Hasher::try_build_merkle_tree_columns`], but accepts retained
     /// column storage allocated by
     /// [`Hasher::try_allocate_merkle_tree_columns`].
+    #[allow(clippy::type_complexity)]
     fn try_build_merkle_tree_column_store(
         columns: &crate::hash::merkle_tree::ColumnStore<F>,
         cap_height: usize,
@@ -210,6 +213,7 @@ pub trait Hasher<F: RichField>: Sized + Copy + Debug + Eq + PartialEq {
     /// specialized backend is available. Returns the retained LDE column
     /// storage plus digests in the level-order
     /// [`crate::hash::merkle_tree::LevelOrderDigests`] layout and the cap.
+    #[allow(clippy::type_complexity)]
     fn try_build_commitment_from_coeffs(
         _coeff_columns: &[&[F]],
         _rate_bits: usize,

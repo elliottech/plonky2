@@ -108,7 +108,7 @@ fn bitrev_flatten<F: RichField + Extendable<D>, const D: usize>(values: &[F::Ext
             .enumerate()
             .for_each(|(block, out)| {
                 let base = block * FLATTEN_BLOCK;
-                for (j, slot) in out.chunks_exact_mut(D).enumerate() {
+                for (j, slot) in out.as_chunks_mut::<D>().0.iter_mut().enumerate() {
                     let limbs = values[reverse_bits(base + j, log_n)].to_basefield_array();
                     for k in 0..D {
                         slot[k].write(limbs[k]);
@@ -122,6 +122,7 @@ fn bitrev_flatten<F: RichField + Extendable<D>, const D: usize>(values: &[F::Ext
     flat
 }
 
+#[allow(clippy::uninit_vec)]
 fn fri_committed_trees<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>(
     mut coeffs: PolynomialCoeffs<F::Extension>,
     mut values: PolynomialValues<F::Extension>,

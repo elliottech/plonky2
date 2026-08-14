@@ -1141,6 +1141,7 @@ mod tests {
 
     /// Builds an outer circuit verifying two independent inner proofs, mirroring a chain step's
     /// tx-proof/cyclic-proof pair. Returns the outer circuit and the two input halves.
+    #[allow(clippy::type_complexity)]
     fn two_inner_proof_fixture() -> Result<(
         crate::plonk::circuit_data::CircuitData<F, C, D>,
         PartialWitness<F>,
