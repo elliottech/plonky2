@@ -1321,15 +1321,15 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
         let domain_separator = self.domain_separator.unwrap_or_default();
         let domain_separator_digest = C::Hasher::hash_pad(&domain_separator);
         // TODO: This should also include an encoding of gate constraints.
+        let mut circuit_metadata = vec![
+            F::from_canonical_usize(degree_bits),
+            F::from_canonical_usize(self.dynamic_luts.len()),
+        ];
+        circuit_metadata.extend(self.dynamic_luts.iter().copied().map(F::from_bool));
         let circuit_digest_parts = [
             constants_sigmas_cap.flatten(),
             domain_separator_digest.to_vec(),
-            vec![
-                F::from_canonical_usize(degree_bits),
-                F::from_canonical_usize(self.dynamic_luts.len()),
-                F::from_bool(self.dynamic_luts.iter().any(|&dynamic| dynamic)),
-                /* Add other circuit data here */
-            ],
+            circuit_metadata,
         ];
         let circuit_digest = C::Hasher::hash_no_pad(&circuit_digest_parts.concat());
 

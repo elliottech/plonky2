@@ -374,13 +374,6 @@ impl<'a, F: Field> PartitionWitness<'a, F> {
         }
     }
 
-    /// Replaces a partition value after witness generators have run. This is used for dynamic
-    /// lookup-table cells, whose placeholder gate generators establish shape but not values.
-    pub(crate) fn overwrite_target(&mut self, target: Target, value: F) {
-        let rep_index = self.representative_map[self.target_index(target)];
-        self.values[rep_index] = Some(value);
-    }
-
     pub(crate) fn target_index(&self, target: Target) -> usize {
         target.index(self.num_wires, self.degree)
     }

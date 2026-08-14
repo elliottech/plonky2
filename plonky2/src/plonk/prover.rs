@@ -5,7 +5,7 @@ use alloc::{format, vec, vec::Vec};
 use core::cmp::min;
 use core::mem::swap;
 
-use anyhow::{ensure, Result};
+use anyhow::{anyhow, ensure, Result};
 use hashbrown::HashMap;
 use plonky2_maybe_rayon::*;
 
@@ -100,22 +100,25 @@ pub fn set_lookup_wires<
         // Compute multiplicities.
         let mut multiplicities = vec![0; lut_len];
 
-        let table_value_to_idx: HashMap<u16, usize> = lut
-            .iter()
-            .enumerate()
-            .map(|(i, (inp_target, _))| (*inp_target, i))
-            .collect();
+        let table_pair_to_idx: HashMap<(u16, u16), usize> =
+            lut.iter().enumerate().map(|(i, &pair)| (pair, i)).collect();
 
-        for (inp_target, out_target) in prover_data.lut_to_lookups[lut_index].iter() {
-            let inp_value = pw.get_target(*inp_target);
-            let idx = table_value_to_idx
-                .get(&u16::try_from(inp_value.to_canonical_u64()).unwrap())
-                .unwrap();
+        for &(inp_target, out_target) in &prover_data.lut_to_lookups[lut_index] {
+            let input_value = pw
+                .try_get_target(inp_target)
+                .ok_or_else(|| anyhow!("lookup input is missing from the witness"))?;
+            let output_value = pw
+                .try_get_target(out_target)
+                .ok_or_else(|| anyhow!("lookup output is missing from the witness"))?;
+            let input = u16::try_from(input_value.to_canonical_u64())
+                .map_err(|_| anyhow!("lookup input does not fit in u16"))?;
+            let output = u16::try_from(output_value.to_canonical_u64())
+                .map_err(|_| anyhow!("lookup output does not fit in u16"))?;
+            let idx = table_pair_to_idx
+                .get(&(input, output))
+                .ok_or_else(|| anyhow!("lookup pair is not present in the lookup table"))?;
 
             multiplicities[*idx] += 1;
-            if common_data.dynamic_luts[lut_index] {
-                pw.overwrite_target(*out_target, F::from_canonical_u16(lut[*idx].1));
-            }
         }
 
         // Pad the last `LookupGate` with the first entry from the LUT.
@@ -143,8 +146,8 @@ pub fn set_lookup_wires<
             let inp_target = Target::wire(row, LookupTableGate::wire_ith_looked_inp(col));
             let out_target = Target::wire(row, LookupTableGate::wire_ith_looked_out(col));
             let (input, output) = lut[lut_entry];
-            pw.overwrite_target(inp_target, F::from_canonical_u16(input));
-            pw.overwrite_target(out_target, F::from_canonical_u16(output));
+            pw.set_target(inp_target, F::from_canonical_u16(input))?;
+            pw.set_target(out_target, F::from_canonical_u16(output))?;
 
             pw.set_target(
                 mul_target,
@@ -156,14 +159,14 @@ pub fn set_lookup_wires<
         for lut_entry in lut_len..padded_len {
             let row = first_lut_gate - lut_entry / num_lut_entries;
             let col = lut_entry % num_lut_entries;
-            pw.overwrite_target(
+            pw.set_target(
                 Target::wire(row, LookupTableGate::wire_ith_looked_inp(col)),
                 F::from_canonical_u16(first_inp_value),
-            );
-            pw.overwrite_target(
+            )?;
+            pw.set_target(
                 Target::wire(row, LookupTableGate::wire_ith_looked_out(col)),
                 F::from_canonical_u16(first_out_value),
-            );
+            )?;
         }
     }
 
