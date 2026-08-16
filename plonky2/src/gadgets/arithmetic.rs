@@ -85,7 +85,6 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
             return result;
         }
 
-        let result: Target;
         let zero = self.zero();
         let one = self.one();
 
@@ -93,26 +92,25 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
         let use_multiplication: bool = (addend == zero) & self.config.multiplication_gate_enabled();
         let use_addition: bool = ((multiplicand_0 == one) || (multiplicand_1 == one))
             & self.config.addition_gate_enabled();
-        if multiplicand_0 == one && use_addition {
-            result = self.add_base_addition_operation(BaseAdditionOperation {
+        let result = if multiplicand_0 == one && use_addition {
+            self.add_base_addition_operation(BaseAdditionOperation {
                 const_0: operation.const_0,
                 addend_0: operation.multiplicand_1,
                 const_1: operation.const_1,
                 addend_1: operation.addend,
-            });
+            })
         } else if multiplicand_1 == one && use_addition {
-            result = self.add_base_addition_operation(BaseAdditionOperation {
+            self.add_base_addition_operation(BaseAdditionOperation {
                 const_0: operation.const_0,
                 addend_0: operation.multiplicand_0,
                 const_1: operation.const_1,
                 addend_1: operation.addend,
-            });
+            })
         } else if addend == zero && use_multiplication {
-            result = self
-                .add_base_multiplication_operation(BaseMultiplicationOperation::from(operation));
+            self.add_base_multiplication_operation(BaseMultiplicationOperation::from(operation))
         } else {
-            result = self.add_base_arithmetic_operation(operation);
-        }
+            self.add_base_arithmetic_operation(operation)
+        };
 
         // Otherwise, we must actually perform the operation using an ArithmeticExtensionGate slot.
         self.base_arithmetic_results.insert(operation, result);

@@ -11,7 +11,7 @@ use core::marker::PhantomData;
 #[cfg(feature = "std")]
 use std::collections::BTreeMap;
 
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use plonky2_maybe_rayon::*;
 
 use crate::field::extension::Extendable;
@@ -897,8 +897,8 @@ impl<F: RichField + Extendable<D>, const D: usize> SimpleGenerator<F, D> for Con
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
 
     use super::*;
     use crate::field::goldilocks_field::GoldilocksField;
@@ -1045,6 +1045,7 @@ mod tests {
 
     /// Builds an outer circuit verifying two independent inner proofs, mirroring a chain step's
     /// tx-proof/cyclic-proof pair. Returns the outer circuit and the two input halves.
+    #[allow(clippy::type_complexity)]
     fn two_inner_proof_fixture() -> Result<(
         crate::plonk::circuit_data::CircuitData<F, C, D>,
         PartialWitness<F>,
@@ -1101,10 +1102,7 @@ mod tests {
     /// The initialization that `seed_inputs_and_unresolved_watches` replaced: seed every input,
     /// then walk the entire representative-keyed watcher map counting, per generator, the
     /// still-unpopulated representatives it watches. Kept as an in-test oracle.
-    fn legacy_seed_inputs_and_unresolved_watches<
-        C: GenericConfig<D, F = F>,
-        const D: usize,
-    >(
+    fn legacy_seed_inputs_and_unresolved_watches<C: GenericConfig<D, F = F>, const D: usize>(
         witness: &mut PartitionWitness<F>,
         inputs: PartialWitness<F>,
         prover_data: &ProverOnlyCircuitData<F, C, D>,

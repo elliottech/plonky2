@@ -135,6 +135,7 @@ where
 }
 
 /// Batch every D-sized chunks into extension field elements.
+#[allow(clippy::chunks_exact_to_as_chunks)]
 pub fn unflatten<F, const D: usize>(l: &[F]) -> Vec<F::Extension>
 where
     F: Field + Extendable<D>,

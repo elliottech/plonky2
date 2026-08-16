@@ -10,10 +10,10 @@ use crate::field::extension::Extendable;
 use crate::field::fft::{fft_in_place_with_options, FftRootTable};
 use crate::field::packed::PackedField;
 use crate::field::polynomial::{PolynomialCoeffs, PolynomialValues};
-use crate::fri::FriParams;
 use crate::fri::proof::FriProof;
 use crate::fri::prover::fri_proof;
 use crate::fri::structure::{FriBatchInfo, FriInstanceInfo};
+use crate::fri::FriParams;
 use crate::hash::hash_types::RichField;
 use crate::hash::merkle_tree::{ColumnStore, MerkleLeaves, MerkleTree};
 use crate::iop::challenger::Challenger;
@@ -81,16 +81,11 @@ impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>
         fft_root_table: Option<&FftRootTable<F>>,
     ) -> Self {
         if GPU_NTT_COMMITMENTS && !blinding {
-            let value_columns: Vec<&[F]> =
-                values.iter().map(|v| v.values.as_slice()).collect();
+            let value_columns: Vec<&[F]> = values.iter().map(|v| v.values.as_slice()).collect();
             if let Some((columns, digests, cap, coeff_columns)) = timed!(
                 timing,
                 "build Merkle tree",
-                C::Hasher::try_build_commitment_from_values(
-                    &value_columns,
-                    rate_bits,
-                    cap_height,
-                )
+                C::Hasher::try_build_commitment_from_values(&value_columns, rate_bits, cap_height,)
             ) {
                 let degree = values[0].len();
                 let merkle_tree = MerkleTree::from_prebuilt_columns(columns, digests, cap);
@@ -135,18 +130,12 @@ impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>
         let degree = polynomials[0].len();
 
         if GPU_NTT_COMMITMENTS && !blinding {
-            let coeff_columns: Vec<&[F]> = polynomials
-                .iter()
-                .map(|p| p.coeffs.as_slice())
-                .collect();
+            let coeff_columns: Vec<&[F]> =
+                polynomials.iter().map(|p| p.coeffs.as_slice()).collect();
             if let Some((columns, digests, cap)) = timed!(
                 timing,
                 "build Merkle tree",
-                C::Hasher::try_build_commitment_from_coeffs(
-                    &coeff_columns,
-                    rate_bits,
-                    cap_height,
-                )
+                C::Hasher::try_build_commitment_from_coeffs(&coeff_columns, rate_bits, cap_height,)
             ) {
                 let merkle_tree = MerkleTree::from_prebuilt_columns(columns, digests, cap);
                 return Self {
@@ -529,9 +518,10 @@ impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>
         // the clone-then-resize that `lde(&self)` performs.
         let mut lde_final_poly = final_poly;
         let live_coeffs = lde_final_poly.len();
-        lde_final_poly
-            .coeffs
-            .resize(live_coeffs << fri_params.config.rate_bits, F::Extension::ZERO);
+        lde_final_poly.coeffs.resize(
+            live_coeffs << fri_params.config.rate_bits,
+            F::Extension::ZERO,
+        );
         let lde_final_values = timed!(
             timing,
             &format!("perform final FFT {}", lde_final_poly.len()),
@@ -845,10 +835,8 @@ mod tests {
                         coeffs.resize(n, F::ZERO);
                         let poly = PolynomialCoeffs::new(coeffs);
                         let shift = F::rand();
-                        let expected =
-                            poly.coset_fft_with_options(shift, Some(rate_bits), None);
-                        let actual =
-                            coset_fft_zero_tail(&poly, shift, live, Some(rate_bits), None);
+                        let expected = poly.coset_fft_with_options(shift, Some(rate_bits), None);
+                        let actual = coset_fft_zero_tail(&poly, shift, live, Some(rate_bits), None);
                         assert_eq!(actual.values, expected.values);
                     }
                 }
@@ -880,7 +868,7 @@ mod tests {
         fn raw(values: &[F]) -> Vec<u64> {
             values
                 .iter()
-                .flat_map(|x| FieldExtension::<2>::to_basefield_array(x))
+                .flat_map(FieldExtension::<2>::to_basefield_array)
                 .map(|c: GoldilocksField| c.to_noncanonical_u64())
                 .collect()
         }

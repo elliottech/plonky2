@@ -409,8 +409,7 @@ pub(crate) fn eval_vanishing_poly_base_batch<F: RichField + Extendable<D>, const
                     }
                 }
 
-                let row =
-                    &mut term_rows[(num_challenges + i * num_chunks + c) * n..][..n];
+                let row = &mut term_rows[(num_challenges + i * num_chunks + c) * n..][..n];
                 // Chunk c reads accumulator column c as prev and column c+1
                 // as next.
                 let prev_col = acc_col(i, c);
@@ -927,12 +926,17 @@ pub fn evaluate_gate_constraints<F: RichField + Extendable<D>, const D: usize>(
 /// Returns a vector of `num_gate_constraints * vars_batch.len()` field elements. The constraints
 /// corresponding to `vars_batch[i]` are found in `result[i], result[vars_batch.len() + i],
 /// result[2 * vars_batch.len() + i], ...`.
+#[allow(dead_code)]
 pub fn evaluate_gate_constraints_base_batch<F: RichField + Extendable<D>, const D: usize>(
     common_data: &CommonCircuitData<F, D>,
     vars_batch: EvaluationVarsBaseBatch<F>,
 ) -> Vec<F> {
     let mut constraints_batch = Vec::new();
-    evaluate_gate_constraints_base_batch_into::<F, D>(common_data, vars_batch, &mut constraints_batch);
+    evaluate_gate_constraints_base_batch_into::<F, D>(
+        common_data,
+        vars_batch,
+        &mut constraints_batch,
+    );
     constraints_batch
 }
 
@@ -1166,62 +1170,6 @@ pub(crate) fn eval_vanishing_poly_circuit<F: RichField + Extendable<D>, const D:
         .collect()
 }
 
-#[cfg(test)]
-mod tests {
-    use plonky2_field::goldilocks_field::GoldilocksField;
-
-    use super::*;
-
-    #[test]
-    fn constraint_major_reduction_preserves_pointwise_horner_order() {
-        type F = GoldilocksField;
-
-        let alphas = [F::from_canonical_u64(3), F::from_canonical_u64(5)];
-
-        // Hand-checked two-point fixture. For the first challenge at point zero,
-        // the expected Horner chain is 7 + 3 * (13 + 3 * 5) = 91.
-        let terms = [
-            F::from_canonical_u64(7),
-            F::from_canonical_u64(11),
-            F::from_canonical_u64(13),
-            F::from_canonical_u64(17),
-        ];
-        let mut actual = [
-            F::from_canonical_u64(5),
-            F::from_canonical_u64(5),
-            F::from_canonical_u64(6),
-            F::from_canonical_u64(6),
-        ];
-        reduce_gate_constraints_base_batch(&terms, 2, &alphas, &mut actual);
-        assert_eq!(actual[0], F::from_canonical_u64(91));
-        assert_eq!(actual[2], F::from_canonical_u64(116));
-
-        for batch_size in [1, 11, 31, 32] {
-            let num_constraints = 7;
-            let terms = (0..batch_size * num_constraints)
-                .map(|i| F::from_canonical_usize(i * 17 + 3))
-                .collect::<Vec<_>>();
-            let initial = (0..batch_size * alphas.len())
-                .map(|i| F::from_canonical_usize(i * 19 + 7))
-                .collect::<Vec<_>>();
-            let mut expected = initial.clone();
-            for point in 0..batch_size {
-                let point_result = &mut expected[point * alphas.len()..(point + 1) * alphas.len()];
-                for constraint_row in terms.chunks_exact(batch_size).rev() {
-                    let term = constraint_row[point];
-                    for (result, &alpha) in point_result.iter_mut().zip(&alphas) {
-                        *result = term.multiply_accumulate(*result, alpha);
-                    }
-                }
-            }
-
-            let mut actual = initial;
-            reduce_gate_constraints_base_batch(&terms, batch_size, &alphas, &mut actual);
-            assert_eq!(actual, expected, "batch size {batch_size}");
-        }
-    }
-}
-
 /// Same as `check_lookup_constraints`, but for the recursive case.
 pub fn check_lookup_constraints_circuit<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
@@ -1431,4 +1379,60 @@ pub fn check_lookup_constraints_circuit<F: RichField + Extendable<D>, const D: u
         ));
     }
     constraints
+}
+
+#[cfg(test)]
+mod tests {
+    use plonky2_field::goldilocks_field::GoldilocksField;
+
+    use super::*;
+
+    #[test]
+    fn constraint_major_reduction_preserves_pointwise_horner_order() {
+        type F = GoldilocksField;
+
+        let alphas = [F::from_canonical_u64(3), F::from_canonical_u64(5)];
+
+        // Hand-checked two-point fixture. For the first challenge at point zero,
+        // the expected Horner chain is 7 + 3 * (13 + 3 * 5) = 91.
+        let terms = [
+            F::from_canonical_u64(7),
+            F::from_canonical_u64(11),
+            F::from_canonical_u64(13),
+            F::from_canonical_u64(17),
+        ];
+        let mut actual = [
+            F::from_canonical_u64(5),
+            F::from_canonical_u64(5),
+            F::from_canonical_u64(6),
+            F::from_canonical_u64(6),
+        ];
+        reduce_gate_constraints_base_batch(&terms, 2, &alphas, &mut actual);
+        assert_eq!(actual[0], F::from_canonical_u64(91));
+        assert_eq!(actual[2], F::from_canonical_u64(116));
+
+        for batch_size in [1, 11, 31, 32] {
+            let num_constraints = 7;
+            let terms = (0..batch_size * num_constraints)
+                .map(|i| F::from_canonical_usize(i * 17 + 3))
+                .collect::<Vec<_>>();
+            let initial = (0..batch_size * alphas.len())
+                .map(|i| F::from_canonical_usize(i * 19 + 7))
+                .collect::<Vec<_>>();
+            let mut expected = initial.clone();
+            for point in 0..batch_size {
+                let point_result = &mut expected[point * alphas.len()..(point + 1) * alphas.len()];
+                for constraint_row in terms.chunks_exact(batch_size).rev() {
+                    let term = constraint_row[point];
+                    for (result, &alpha) in point_result.iter_mut().zip(&alphas) {
+                        *result = term.multiply_accumulate(*result, alpha);
+                    }
+                }
+            }
+
+            let mut actual = initial;
+            reduce_gate_constraints_base_batch(&terms, batch_size, &alphas, &mut actual);
+            assert_eq!(actual, expected, "batch size {batch_size}");
+        }
+    }
 }

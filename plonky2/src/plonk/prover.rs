@@ -32,8 +32,8 @@ use crate::plonk::vanishing_poly::{
 };
 use crate::plonk::vars::EvaluationVarsBaseBatch;
 use crate::timed;
+use crate::util::log2_ceil;
 use crate::util::timing::TimingTree;
-use crate::util::{log2_ceil};
 
 /// Set all the lookup gate wires (including multiplicities) and pad unused LU slots.
 /// Warning: rows are in descending order: the first gate to appear is the last LU gate, and
@@ -787,12 +787,11 @@ fn compute_quotient_polys<
     // computed once per circuit shape for the process and shared across proofs. Each cached
     // entry is bit-identical to the per-point inversion it replaces.
     #[cfg(feature = "std")]
-    let z_h_on_coset = z_h_on_coset.with_l_0_denominator_inverses(
-        l_0_table_cache::l_0_denominator_inverses::<F>(
+    let z_h_on_coset =
+        z_h_on_coset.with_l_0_denominator_inverses(l_0_table_cache::l_0_denominator_inverses::<F>(
             common_data.degree_bits(),
             quotient_degree_bits,
-        ),
-    );
+        ));
 
     // Precompute the lookup table evals on the challenges in delta
     // These values are used to produce the final RE constraints for each lut,
@@ -1096,8 +1095,7 @@ pub(crate) mod precomputed {
             if let Some(hit) = map.read().unwrap().get(&key) {
                 return Arc::clone(hit)
                     .downcast::<Vec<F>>()
-                    .ok()
-                    .expect("type-keyed cache entry has the keyed type");
+                    .unwrap_or_else(|_| panic!("type-keyed cache entry has the keyed type"));
             }
             let computed: Arc<Vec<F>> = Arc::new(compute());
             let mut map = map.write().unwrap();
@@ -1108,8 +1106,7 @@ pub(crate) mod precomputed {
                 .or_insert_with(|| computed as Arc<dyn Any + Send + Sync>);
             Arc::clone(entry)
                 .downcast::<Vec<F>>()
-                .ok()
-                .expect("type-keyed cache entry has the keyed type")
+                .unwrap_or_else(|_| panic!("type-keyed cache entry has the keyed type"))
         }
 
         /// Cached `F::two_adic_subgroup(n_log)`.
@@ -1336,6 +1333,7 @@ mod l_0_table_cache {
 
     /// Keyed by field type and `(degree_bits, quotient_degree_bits)`; the coset shift is a
     /// constant of the field type.
+    #[allow(clippy::type_complexity)]
     static CACHE: OnceLock<Mutex<HashMap<(TypeId, usize, usize), Arc<dyn Any + Send + Sync>>>> =
         OnceLock::new();
 
@@ -1377,9 +1375,8 @@ mod flat_chunk_products_tests {
     use plonky2_field::goldilocks_field::GoldilocksField;
     use plonky2_field::types::{Field, PrimeField64};
 
-    use crate::util::partial_products::quotient_chunk_products_into;
-
     use super::divide_chunk_products;
+    use crate::util::partial_products::quotient_chunk_products_into;
 
     type F = GoldilocksField;
 
@@ -1464,7 +1461,7 @@ mod flat_chunk_products_tests {
         let num_routed_wires = 80usize;
         let degree = 8usize;
         let num_chunks = num_routed_wires.div_ceil(degree);
-        let num_prods = num_chunks - 1;
+        let _num_prods = num_chunks - 1;
 
         for &n_points in &[1usize, 5, 128, 300] {
             let points: Vec<Vec<F>> = (0..n_points)

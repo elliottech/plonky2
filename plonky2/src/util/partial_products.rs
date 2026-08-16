@@ -10,6 +10,7 @@ use crate::hash::hash_types::RichField;
 use crate::iop::ext_target::ExtensionTarget;
 use crate::plonk::circuit_builder::CircuitBuilder;
 
+#[allow(dead_code)]
 pub(crate) fn quotient_chunk_products<F: Field>(
     quotient_values: &[F],
     max_degree: usize,
@@ -29,6 +30,7 @@ pub(crate) fn quotient_chunk_products<F: Field>(
 /// this once per subgroup point with a slice of its flat chunk-products buffer, instead of
 /// collecting a fresh Vec per point. Products and their order are identical to the allocating
 /// form: each output is the same left-to-right `product()` over the same chunk.
+#[allow(dead_code)]
 pub(crate) fn quotient_chunk_products_into<F: Field>(
     quotient_values: &[F],
     max_degree: usize,
@@ -46,6 +48,7 @@ pub(crate) fn quotient_chunk_products_into<F: Field>(
 
 /// Compute partial products of the original vector `v` such that all products consist of `max_degree`
 /// or less elements. This is done until we've computed the product `P` of all elements in the vector.
+#[allow(dead_code)]
 pub(crate) fn partial_products_and_z_gx<F: Field>(z_x: F, quotient_chunk_products: &[F]) -> Vec<F> {
     assert!(!quotient_chunk_products.is_empty());
     let mut res = Vec::with_capacity(quotient_chunk_products.len());

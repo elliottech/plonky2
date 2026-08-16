@@ -117,6 +117,7 @@ pub trait Hasher<F: RichField>: Sized + Copy + Debug + Eq + PartialEq {
     /// `leaves` is one flat row-major buffer holding `num_leaves` leaves of `leaf_width`
     /// field elements each. The first result uses
     /// [`crate::hash::merkle_tree::MerkleTree::digests`] layout.
+    #[allow(clippy::type_complexity)]
     fn try_build_merkle_tree(
         _leaves: &[F],
         _leaf_width: usize,
@@ -129,6 +130,7 @@ pub trait Hasher<F: RichField>: Sized + Copy + Debug + Eq + PartialEq {
     /// Like [`Hasher::try_build_merkle_tree`], but the leaves arrive as
     /// natural-order poly-major columns: tree leaf `i` is
     /// `columns[j][reverse_bits(i, log2(num_leaves))]`.
+    #[allow(clippy::type_complexity)]
     fn try_build_merkle_tree_columns(
         _columns: &[Vec<F>],
         _cap_height: usize,
@@ -139,6 +141,7 @@ pub trait Hasher<F: RichField>: Sized + Copy + Debug + Eq + PartialEq {
     /// Allocates retained column-major leaf storage suitable for a specialized
     /// Merkle backend. The caller may compute the columns directly in this
     /// storage before passing it to [`Hasher::try_build_merkle_tree_column_store`].
+    #[allow(clippy::type_complexity)]
     fn try_allocate_merkle_tree_columns(
         _num_columns: usize,
         _num_rows: usize,
@@ -150,6 +153,7 @@ pub trait Hasher<F: RichField>: Sized + Copy + Debug + Eq + PartialEq {
     /// Like [`Hasher::try_build_merkle_tree_columns`], but accepts retained
     /// column storage allocated by
     /// [`Hasher::try_allocate_merkle_tree_columns`].
+    #[allow(clippy::type_complexity)]
     fn try_build_merkle_tree_column_store(
         columns: &crate::hash::merkle_tree::ColumnStore<F>,
         cap_height: usize,
@@ -168,6 +172,7 @@ pub trait Hasher<F: RichField>: Sized + Copy + Debug + Eq + PartialEq {
     /// specialized backend is available. Returns the retained LDE column
     /// storage plus digests and cap in
     /// [`crate::hash::merkle_tree::MerkleTree::digests`] layout.
+    #[allow(clippy::type_complexity)]
     fn try_build_commitment_from_coeffs(
         _coeff_columns: &[&[F]],
         _rate_bits: usize,

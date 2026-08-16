@@ -407,9 +407,8 @@ impl<'a, F: Field> PartitionWitness<'a, F> {
         // and initializes every cell exactly once before the final `set_len`.
         let num_wires = self.num_wires;
         let degree = self.degree;
-        let mut wire_values: Vec<Vec<F>> = (0..num_wires)
-            .map(|_| Vec::with_capacity(degree))
-            .collect();
+        let mut wire_values: Vec<Vec<F>> =
+            (0..num_wires).map(|_| Vec::with_capacity(degree)).collect();
         let num_chunks = 16.min(degree.max(1));
         let chunk_rows = degree.div_ceil(num_chunks);
         {
@@ -417,8 +416,7 @@ impl<'a, F: Field> PartitionWitness<'a, F> {
                 .map(|_| Vec::with_capacity(num_wires))
                 .collect();
             for column in wire_values.iter_mut() {
-                let mut rest =
-                    crate::hash::merkle_tree::capacity_up_to_mut(column, degree);
+                let mut rest = crate::hash::merkle_tree::capacity_up_to_mut(column, degree);
                 for segment_columns in segments.iter_mut() {
                     let take = chunk_rows.min(rest.len());
                     let (head, tail) = rest.split_at_mut(take);
@@ -435,9 +433,8 @@ impl<'a, F: Field> PartitionWitness<'a, F> {
                     let mut wire_index = chunk * chunk_rows * num_wires;
                     for i in 0..rows {
                         for column in columns.iter_mut() {
-                            column[i].write(
-                                self.values[self.representative_map[wire_index] as usize],
-                            );
+                            column[i]
+                                .write(self.values[self.representative_map[wire_index] as usize]);
                             wire_index += 1;
                         }
                     }

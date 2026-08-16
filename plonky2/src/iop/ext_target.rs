@@ -150,6 +150,7 @@ pub fn flatten_target<const D: usize>(l: &[ExtensionTarget<D>]) -> Vec<Target> {
 }
 
 /// Batch every D-sized chunks into extension targets.
+#[allow(clippy::chunks_exact_to_as_chunks)]
 pub fn unflatten_target<const D: usize>(l: &[Target]) -> Vec<ExtensionTarget<D>> {
     debug_assert_eq!(l.len() % D, 0);
     l.chunks_exact(D)

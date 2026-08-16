@@ -451,6 +451,7 @@ mod tests {
         type FF = <C as GenericConfig<D>>::FE;
 
         // Reference: the pre-change body, verbatim.
+        #[allow(unused_assignments)]
         fn legacy(alpha: FF, lens: &[usize], polys: &[PolynomialCoeffs<F>]) -> Vec<FF> {
             let mut rf = ReducingFactor::new(alpha);
             let mut acc: Vec<FF> = Vec::new();
@@ -490,8 +491,7 @@ mod tests {
                 .collect();
 
             let expected = legacy(alpha, lens, &polys);
-            let actual =
-                ReducingFactor::new(alpha).reduce_polys_base::<F, D>(polys.iter());
+            let actual = ReducingFactor::new(alpha).reduce_polys_base::<F, D>(polys.iter());
 
             assert_eq!(actual.coeffs.len(), expected.len(), "length for {lens:?}");
             for (i, (a, e)) in actual.coeffs.iter().zip(expected.iter()).enumerate() {

@@ -353,7 +353,7 @@ mod tests {
     use unroll::unroll_for_loops;
 
     use crate::extension::quadratic::QuadraticExtension;
-    use crate::fft::{FftRootTable, fft, fft_classic, fft_root_table, fft_with_options, ifft};
+    use crate::fft::{fft, fft_classic, fft_root_table, fft_with_options, ifft, FftRootTable};
     use crate::goldilocks_field::GoldilocksField;
     use crate::packable::Packable;
     use crate::packed::PackedField;
@@ -645,5 +645,4 @@ mod tests {
         fft_classic(&mut actual, r, &roots);
         assert_eq!(actual, expected);
     }
-
 }

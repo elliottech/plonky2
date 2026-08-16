@@ -94,6 +94,7 @@ pub fn final_poly_coeff_len(mut degree_bits: usize, reduction_arity_bits: &Vec<u
 /// outputs `b * FLATTEN_BLOCK .. (b + 1) * FLATTEN_BLOCK`, a partition of
 /// `0..n`, so every slot is written exactly once and the source is only read —
 /// the result is index-for-index identical to the serial fill.
+#[allow(clippy::chunks_exact_to_as_chunks)]
 fn bitrev_flatten<F: RichField + Extendable<D>, const D: usize>(values: &[F::Extension]) -> Vec<F> {
     const FLATTEN_BLOCK: usize = 1 << 10;
 
@@ -163,11 +164,8 @@ fn fri_committed_trees<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>,
         // Chunk-wise folding preserves the zero tail: the coefficient vector
         // keeps `1/2^rate_bits` support every round (asserted by the
         // truncation below), so the FFT's zero-run shortcut always applies.
-        values = coeffs.coset_fft_with_options(
-            shift.into(),
-            Some(fri_params.config.rate_bits),
-            None,
-        )
+        values =
+            coeffs.coset_fft_with_options(shift.into(), Some(fri_params.config.rate_bits), None)
     }
 
     // When verifying this proof in a circuit with a different number of query steps,

@@ -2319,16 +2319,33 @@ mod tests {
     /// and must round-trip.
     #[test]
     fn usize_encoded_u32_vec_matches_legacy_encoding() {
-        let values: Vec<u32> = vec![0, 1, 2, 7, 255, 256, 65_535, 1 << 20, u32::MAX - 1, u32::MAX];
+        let values: Vec<u32> = vec![
+            0,
+            1,
+            2,
+            7,
+            255,
+            256,
+            65_535,
+            1 << 20,
+            u32::MAX - 1,
+            u32::MAX,
+        ];
         let widened: Vec<usize> = values.iter().map(|&v| v as usize).collect();
 
         let mut narrow = Vec::new();
         narrow.write_usize_encoded_u32_vec(&values).unwrap();
         let mut legacy = Vec::new();
         legacy.write_usize_vec(&widened).unwrap();
-        assert_eq!(narrow, legacy, "u32 encoding diverges from the legacy bytes");
+        assert_eq!(
+            narrow, legacy,
+            "u32 encoding diverges from the legacy bytes"
+        );
         assert_eq!(narrow.len(), 8 * (values.len() + 1));
-        assert_eq!(Buffer::new(&narrow).read_usize_encoded_u32_vec().unwrap(), values);
+        assert_eq!(
+            Buffer::new(&narrow).read_usize_encoded_u32_vec().unwrap(),
+            values
+        );
 
         // An empty vector still writes its length word.
         let mut narrow = Vec::new();
@@ -2410,8 +2427,7 @@ mod tests {
             circuit.prover_only.representative_map
         );
         assert_eq!(
-            decoded.generator_watch_counts,
-            circuit.prover_only.generator_watch_counts,
+            decoded.generator_watch_counts, circuit.prover_only.generator_watch_counts,
             "reconstructed watch counts differ from the builder-derived ones"
         );
         assert_eq!(
@@ -2428,7 +2444,11 @@ mod tests {
         assert_eq!(decoded.circuit_digest, circuit.prover_only.circuit_digest);
         assert_eq!(
             decoded.constants_sigmas_commitment.merkle_tree.cap,
-            circuit.prover_only.constants_sigmas_commitment.merkle_tree.cap
+            circuit
+                .prover_only
+                .constants_sigmas_commitment
+                .merkle_tree
+                .cap
         );
 
         // The representative map occupies exactly 8 bytes per entry on the wire, unchanged from

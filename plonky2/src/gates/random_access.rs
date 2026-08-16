@@ -677,7 +677,7 @@ mod tests {
         // raw words.
         fn value(i: usize) -> F {
             let small = ((i as u64).wrapping_mul(0x9e37_79b9) ^ 0x5a5a_a5a5) & 0xffff;
-            if i % 3 == 0 {
+            if i.is_multiple_of(3) {
                 GoldilocksField(F::ORDER + small)
             } else {
                 F::from_canonical_u64(small)
