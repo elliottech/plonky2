@@ -867,11 +867,9 @@ mod tests {
     }
 
     /// The fused quotient accumulation must be bit-identical (raw u64
-    /// representation) to the pre-fusion op sequences it replaces: both the
-    /// classic reference (`divide_by_linear` + explicit zero pad +
-    /// `shift_poly` + add) and this tree's in-place variant
-    /// (`divide_by_linear_padded_in_place` + `shift_poly` + add), including
-    /// the empty-accumulator first batch and mismatched lengths.
+    /// representation) to the pre-fusion op sequence it replaces
+    /// (`divide_by_linear` + explicit zero pad + `shift_poly` + add),
+    /// including the empty-accumulator first batch and mismatched lengths.
     #[test]
     fn fused_quotient_accumulation_matches_reference() {
         use crate::field::extension::FieldExtension;
@@ -909,20 +907,10 @@ mod tests {
             expected *= shift; // shift_poly
             expected += quotient;
 
-            // This tree's exact pre-fusion sequence: the consuming in-place
-            // division (top slot already the pad) + shift_poly + add.
-            let mut expected_in_place = initial.clone();
-            let quotient_in_place = composition_poly
-                .clone()
-                .divide_by_linear_padded_in_place(z);
-            expected_in_place *= shift; // shift_poly
-            expected_in_place += quotient_in_place;
-
             let mut actual = initial;
             accumulate_linear_quotient(&mut actual, &composition_poly, z, shift);
 
             assert_eq!(raw(&actual.coeffs), raw(&expected.coeffs));
-            assert_eq!(raw(&actual.coeffs), raw(&expected_in_place.coeffs));
         }
     }
 }

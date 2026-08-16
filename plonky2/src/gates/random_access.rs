@@ -493,7 +493,7 @@ impl<F: RichField + Extendable<D>, const D: usize> Gate<F, D> for RandomAccessGa
     }
 
     fn num_wires(&self) -> usize {
-        self.wire_bit(self.bits - 1, self.num_copies - 1) + 1
+        self.num_routed_wires() + self.num_copies * self.bits
     }
 
     fn num_constants(&self) -> usize {
