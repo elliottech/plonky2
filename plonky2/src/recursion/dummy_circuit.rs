@@ -178,7 +178,6 @@ where
         let proof_with_pis_target = ProofWithPublicInputsTarget {
             proof: ProofTarget {
                 wires_cap: MerkleCapTarget(vec![]),
-                lookup_table_cap: None,
                 plonk_zs_partial_products_cap: MerkleCapTarget(vec![]),
                 quotient_polys_cap: MerkleCapTarget(vec![]),
                 openings: OpeningSetTarget::default(),
@@ -195,7 +194,6 @@ where
         let proof_with_pis = ProofWithPublicInputs {
             proof: Proof {
                 wires_cap: MerkleCap(vec![]),
-                lookup_table_cap: None,
                 plonk_zs_partial_products_cap: MerkleCap(vec![]),
                 quotient_polys_cap: MerkleCap(vec![]),
                 openings: OpeningSet::default(),

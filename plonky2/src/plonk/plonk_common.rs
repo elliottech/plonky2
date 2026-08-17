@@ -30,17 +30,12 @@ impl PlonkOracle {
         index: 1,
         blinding: true,
     };
-    pub const LOOKUP_TABLE: PlonkOracle = PlonkOracle {
-        index: 2,
-        // The table cap is intentionally deterministic so equal tables have equal commitments.
-        blinding: false,
-    };
     pub const ZS_PARTIAL_PRODUCTS: PlonkOracle = PlonkOracle {
-        index: 3,
+        index: 2,
         blinding: true,
     };
     pub const QUOTIENT: PlonkOracle = PlonkOracle {
-        index: 4,
+        index: 3,
         blinding: true,
     };
 }

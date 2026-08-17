@@ -37,7 +37,6 @@ where
     let config = &common_data.config;
     let Proof {
         wires_cap,
-        lookup_table_cap,
         plonk_zs_partial_products_cap,
         quotient_polys_cap,
         openings,
@@ -49,7 +48,6 @@ where
         constants,
         plonk_sigmas,
         wires,
-        lookup_table,
         plonk_zs,
         plonk_zs_next,
         partial_products,
@@ -59,23 +57,11 @@ where
     } = openings;
     let cap_height = common_data.fri_params.config.cap_height;
     ensure!(wires_cap.height() == cap_height);
-    ensure!(lookup_table_cap.is_some() == (common_data.num_lookup_polys != 0));
-    if let Some(cap) = lookup_table_cap {
-        ensure!(cap.height() == cap_height);
-    }
     ensure!(plonk_zs_partial_products_cap.height() == cap_height);
     ensure!(quotient_polys_cap.height() == cap_height);
     ensure!(constants.len() == common_data.num_constants);
     ensure!(plonk_sigmas.len() == config.num_routed_wires);
     ensure!(wires.len() == config.num_wires);
-    ensure!(
-        lookup_table.len()
-            == if common_data.num_lookup_polys == 0 {
-                0
-            } else {
-                config.num_wires
-            }
-    );
     ensure!(plonk_zs.len() == config.num_challenges);
     ensure!(plonk_zs_next.len() == config.num_challenges);
     ensure!(partial_products.len() == config.num_challenges * common_data.num_partial_products);

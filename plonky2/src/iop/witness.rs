@@ -123,11 +123,6 @@ pub trait WitnessWrite<F: Field> {
         C::Hasher: AlgebraicHasher<F>,
     {
         self.set_cap_target(&proof_target.wires_cap, &proof.wires_cap)?;
-        match (&proof_target.lookup_table_cap, &proof.lookup_table_cap) {
-            (Some(target), Some(cap)) => self.set_cap_target(target, cap)?,
-            (None, None) => {}
-            _ => return Err(anyhow!("lookup table commitment shape mismatch")),
-        }
         self.set_cap_target(
             &proof_target.plonk_zs_partial_products_cap,
             &proof.plonk_zs_partial_products_cap,

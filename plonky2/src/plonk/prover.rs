@@ -35,35 +35,45 @@ use crate::util::partial_products::{partial_products_and_z_gx, quotient_chunk_pr
 use crate::util::timing::TimingTree;
 use crate::util::{log2_ceil, transpose};
 
-fn split_lookup_table_witness<
+fn set_dynamic_lookup_table_wires<
     F: RichField + Extendable<D>,
     C: GenericConfig<D, F = F>,
     const D: usize,
 >(
-    witness: &MatrixWitness<F>,
     prover_data: &ProverOnlyCircuitData<F, C, D>,
     common_data: &CommonCircuitData<F, D>,
-) -> (MatrixWitness<F>, MatrixWitness<F>) {
-    let mut rest = witness.clone();
-    let mut table = MatrixWitness {
-        wire_values: vec![vec![F::ZERO; common_data.degree()]; common_data.config.num_wires],
-    };
+    lookup_tables: &[crate::gates::lookup_table::LookupTable],
+    inputs: &mut PartialWitness<F>,
+) -> Result<()> {
+    let num_lut_entries = LookupTableGate::num_slots(&common_data.config);
+    for (lut_index, lookup) in prover_data.lookup_rows.iter().enumerate() {
+        if !common_data.dynamic_luts[lut_index] {
+            continue;
+        }
 
-    let slots = LookupTableGate::num_slots(&common_data.config);
-    for lookup in &prover_data.lookup_rows {
-        for row in lookup.last_lut_gate..=lookup.first_lut_gate {
-            for slot in 0..slots {
-                for column in [
-                    LookupTableGate::wire_ith_looked_inp(slot),
-                    LookupTableGate::wire_ith_looked_out(slot),
-                ] {
-                    table.wire_values[column][row] = witness.wire_values[column][row];
-                    rest.wire_values[column][row] = F::ZERO;
-                }
-            }
+        let table = &lookup_tables[lut_index];
+        let &(first_input, first_output) = table
+            .first()
+            .ok_or_else(|| anyhow!("dynamic lookup tables cannot be empty"))?;
+        let padded_len = (lookup.first_lut_gate - lookup.last_lut_gate + 1) * num_lut_entries;
+        for table_entry in 0..padded_len {
+            let row = lookup.first_lut_gate - table_entry / num_lut_entries;
+            let slot = table_entry % num_lut_entries;
+            let (input, output) = table
+                .get(table_entry)
+                .copied()
+                .unwrap_or((first_input, first_output));
+            inputs.set_target(
+                Target::wire(row, LookupTableGate::wire_ith_looked_inp(slot)),
+                F::from_canonical_u16(input),
+            )?;
+            inputs.set_target(
+                Target::wire(row, LookupTableGate::wire_ith_looked_out(slot)),
+                F::from_canonical_u16(output),
+            )?;
         }
     }
-    (rest, table)
+    Ok(())
 }
 
 /// Set all the lookup gate wires (including multiplicities) and pad unused LU slots.
@@ -197,7 +207,7 @@ pub fn prove_with_dynamic_lookup_tables<
 >(
     prover_data: &ProverOnlyCircuitData<F, C, D>,
     common_data: &CommonCircuitData<F, D>,
-    inputs: PartialWitness<F>,
+    mut inputs: PartialWitness<F>,
     lookup_tables: &[crate::gates::lookup_table::LookupTable],
     timing: &mut TimingTree,
 ) -> Result<ProofWithPublicInputs<F, C, D>>
@@ -221,6 +231,7 @@ where
             );
         }
     }
+    set_dynamic_lookup_table_wires(prover_data, common_data, lookup_tables, &mut inputs)?;
     let partition_witness = timed!(
         timing,
         &format!("run {} generators", prover_data.generators.len()),
@@ -300,40 +311,15 @@ where
         partition_witness.full_witness()
     );
 
-    let (rest_witness, lookup_table_witness) =
-        split_lookup_table_witness(&witness, prover_data, common_data);
-
     let wires_values: Vec<PolynomialValues<F>> = timed!(
         timing,
         "compute wire polynomials",
-        rest_witness
+        witness
             .wire_values
             .par_iter()
             .map(|column| PolynomialValues::new(column.clone()))
             .collect()
     );
-
-    let lookup_table_commitment = if has_lookup {
-        let values = lookup_table_witness
-            .wire_values
-            .par_iter()
-            .map(|column| PolynomialValues::new(column.clone()))
-            .collect();
-        Some(timed!(
-            timing,
-            "compute lookup table commitment",
-            PolynomialBatch::<F, C, D>::from_values(
-                values,
-                config.fri_config.rate_bits,
-                PlonkOracle::LOOKUP_TABLE.blinding,
-                config.fri_config.cap_height,
-                timing,
-                prover_data.fft_root_table.as_ref(),
-            )
-        ))
-    } else {
-        None
-    };
 
     let wires_commitment = timed!(
         timing,
@@ -358,9 +344,6 @@ where
     challenger.observe_hash::<C::InnerHasher>(public_inputs_hash);
 
     challenger.observe_cap::<C::Hasher>(&wires_commitment.merkle_tree.cap);
-    if let Some(commitment) = &lookup_table_commitment {
-        challenger.observe_cap::<C::Hasher>(&commitment.merkle_tree.cap);
-    }
 
     // We need 4 values per challenge: 2 for the combos, 1 for (X-combo) in the accumulators and 1 to prove that the lookup table was computed correctly.
     // We can reuse betas and gammas for two of them.
@@ -433,7 +416,6 @@ where
             prover_data,
             &public_inputs_hash,
             &wires_commitment,
-            lookup_table_commitment.as_ref(),
             &partial_products_zs_and_lookup_commitment,
             &betas,
             &gammas,
@@ -490,7 +472,6 @@ where
             g,
             &prover_data.constants_sigmas_commitment,
             &wires_commitment,
-            lookup_table_commitment.as_ref(),
             &partial_products_zs_and_lookup_commitment,
             &quotient_polys_commitment,
             common_data
@@ -500,17 +481,14 @@ where
     let instance = common_data.get_fri_instance(zeta);
 
     let opening_proof = timed!(timing, "compute opening proofs", {
-        let mut commitments = vec![&prover_data.constants_sigmas_commitment, &wires_commitment];
-        if let Some(commitment) = &lookup_table_commitment {
-            commitments.push(commitment);
-        }
-        commitments.extend([
-            &partial_products_zs_and_lookup_commitment,
-            &quotient_polys_commitment,
-        ]);
         PolynomialBatch::<F, C, D>::prove_openings(
             &instance,
-            &commitments,
+            &[
+                &prover_data.constants_sigmas_commitment,
+                &wires_commitment,
+                &partial_products_zs_and_lookup_commitment,
+                &quotient_polys_commitment,
+            ],
             &mut challenger,
             &common_data.fri_params,
             None,
@@ -521,7 +499,6 @@ where
 
     let proof = Proof::<F, C, D> {
         wires_cap: wires_commitment.merkle_tree.cap,
-        lookup_table_cap: lookup_table_commitment.map(|c| c.merkle_tree.cap),
         plonk_zs_partial_products_cap: partial_products_zs_and_lookup_commitment.merkle_tree.cap,
         quotient_polys_cap: quotient_polys_commitment.merkle_tree.cap,
         openings,
@@ -788,7 +765,6 @@ fn compute_quotient_polys<
     prover_data: &'a ProverOnlyCircuitData<F, C, D>,
     public_inputs_hash: &<<C as GenericConfig<D>>::InnerHasher as Hasher<F>>::Hash,
     wires_commitment: &'a PolynomialBatch<F, C, D>,
-    lookup_table_commitment: Option<&'a PolynomialBatch<F, C, D>>,
     zs_partial_products_and_lookup_commitment: &'a PolynomialBatch<F, C, D>,
     betas: &[F],
     gammas: &[F],
@@ -890,13 +866,7 @@ fn compute_quotient_polys<
                     .get_lde_values(i, step);
                 let local_constants = &local_constants_sigmas[common_data.constants_range()];
                 let s_sigmas = &local_constants_sigmas[common_data.sigmas_range()];
-                let mut local_wires = wires_commitment.get_lde_values(i, step).to_vec();
-                if let Some(table_commitment) = lookup_table_commitment {
-                    let local_table = table_commitment.get_lde_values(i, step);
-                    for (wire, table) in local_wires.iter_mut().zip(local_table) {
-                        *wire += *table;
-                    }
-                }
+                let local_wires = wires_commitment.get_lde_values(i, step);
                 let local_zs_partial_and_lookup =
                     zs_partial_products_and_lookup_commitment.get_lde_values(i, step);
                 let next_zs_partial_and_lookup =

@@ -5,9 +5,31 @@ use crate::field::extension::Extendable;
 use crate::gates::lookup::LookupGate;
 use crate::gates::lookup_table::{LookupTable, LookupTableGate};
 use crate::gates::noop::NoopGate;
-use crate::hash::hash_types::RichField;
+use crate::hash::hash_types::{HashOut, HashOutTarget, RichField};
 use crate::iop::target::Target;
 use crate::plonk::circuit_builder::CircuitBuilder;
+use crate::plonk::config::{AlgebraicHasher, Hasher};
+
+const DYNAMIC_LOOKUP_TABLE_DOMAIN_SEPARATOR: u64 = 0x4459_4e4c_5554;
+
+/// Computes the public digest used to bind a dynamic lookup table to a proof.
+/// Use the circuit configuration's `InnerHasher` so this matches the in-circuit hash.
+pub fn hash_dynamic_lookup_table<F: RichField, H: Hasher<F, Hash = HashOut<F>>>(
+    lut_index: usize,
+    table: &LookupTable,
+) -> HashOut<F> {
+    let mut input = vec![
+        F::from_canonical_u64(DYNAMIC_LOOKUP_TABLE_DOMAIN_SEPARATOR),
+        F::from_canonical_usize(lut_index),
+        F::from_canonical_usize(table.len()),
+    ];
+    input.extend(
+        table
+            .iter()
+            .flat_map(|&(x, y)| [F::from_canonical_u16(x), F::from_canonical_u16(y)]),
+    );
+    H::hash_no_pad(&input)
+}
 
 /// Lookup tables used in the tests and benchmarks.
 ///
@@ -48,8 +70,15 @@ pub const SMALLER_TABLE: [u16; 8] = [2, 24, 56, 100, 128, 16, 20, 49];
 
 impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
     /// Registers a dynamic lookup table with a circuit-fixed length and prover-supplied entries.
+    /// This also adds four public inputs for its table digest; retrieve their target with
+    /// `dynamic_lookup_table_digest` and populate it using `hash_dynamic_lookup_table`.
     pub fn add_dynamic_lookup_table(&mut self, table_len: usize) -> usize {
         self.update_dynamic_lut(table_len)
+    }
+
+    /// Returns the public input target containing the digest of a dynamic lookup table.
+    pub fn dynamic_lookup_table_digest(&self, lut_index: usize) -> HashOutTarget {
+        self.dynamic_lut_digests[lut_index].expect("lookup table is not dynamic")
     }
 
     /// Registers a lookup request against a dynamic table. The caller supplies/constrains both
@@ -93,7 +122,7 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
 
     /// We call this function at the end of circuit building right before the PI gate to add all `LookupTableGate` and `LookupGate`.
     /// It also updates `self.lookup_rows` accordingly.
-    pub fn add_all_lookups(&mut self) {
+    pub fn add_all_lookups<H: AlgebraicHasher<F>>(&mut self) {
         for lut_index in 0..self.num_luts() {
             assert!(
                 !self.get_lut_lookups(lut_index).is_empty(),
@@ -164,6 +193,28 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
                 }
 
                 let first_lut_gate = self.num_gates() - 1;
+
+                if let Some(expected_digest) = self.dynamic_lut_digests[lut_index] {
+                    let mut hash_input = vec![
+                        self.constant(F::from_canonical_u64(DYNAMIC_LOOKUP_TABLE_DOMAIN_SEPARATOR)),
+                        self.constant(F::from_canonical_usize(lut_index)),
+                        self.constant(F::from_canonical_usize(lut.len())),
+                    ];
+                    for lut_entry in 0..lut.len() {
+                        let row = first_lut_gate - lut_entry / num_lut_entries;
+                        let slot = lut_entry % num_lut_entries;
+                        hash_input.push(Target::wire(
+                            row,
+                            LookupTableGate::wire_ith_looked_inp(slot),
+                        ));
+                        hash_input.push(Target::wire(
+                            row,
+                            LookupTableGate::wire_ith_looked_out(slot),
+                        ));
+                    }
+                    let actual_digest = self.hash_n_to_hash_no_pad::<H>(hash_input);
+                    self.connect_hashes(actual_digest, expected_digest);
+                }
 
                 // Will ensure the next row's wires will be all zeros. With this, there is no distinction between the transition constraints on the first row
                 // and on the other rows. Additionally, initial constraints become a simple zero check.

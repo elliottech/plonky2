@@ -26,7 +26,6 @@ use crate::util::reverse_bits;
 fn get_challenges<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>(
     public_inputs_hash: <<C as GenericConfig<D>>::InnerHasher as Hasher<F>>::Hash,
     wires_cap: &MerkleCap<F, C::Hasher>,
-    lookup_table_cap: Option<&MerkleCap<F, C::Hasher>>,
     plonk_zs_partial_products_cap: &MerkleCap<F, C::Hasher>,
     quotient_polys_cap: &MerkleCap<F, C::Hasher>,
     openings: &OpeningSet<F, D>,
@@ -50,9 +49,6 @@ fn get_challenges<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, cons
     challenger.observe_hash::<C::InnerHasher>(public_inputs_hash);
 
     challenger.observe_cap::<C::Hasher>(wires_cap);
-    if let Some(cap) = lookup_table_cap {
-        challenger.observe_cap::<C::Hasher>(cap);
-    }
     let plonk_betas = challenger.get_n_challenges(num_challenges);
     let plonk_gammas = challenger.get_n_challenges(num_challenges);
 
@@ -121,7 +117,6 @@ impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>
     ) -> anyhow::Result<ProofChallenges<F, D>> {
         let Proof {
             wires_cap,
-            lookup_table_cap,
             plonk_zs_partial_products_cap,
             quotient_polys_cap,
             openings,
@@ -137,7 +132,6 @@ impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>
         get_challenges::<F, C, D>(
             public_inputs_hash,
             wires_cap,
-            lookup_table_cap.as_ref(),
             plonk_zs_partial_products_cap,
             quotient_polys_cap,
             openings,
@@ -162,7 +156,6 @@ impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>
     ) -> anyhow::Result<ProofChallenges<F, D>> {
         let CompressedProof {
             wires_cap,
-            lookup_table_cap,
             plonk_zs_partial_products_cap,
             quotient_polys_cap,
             openings,
@@ -178,7 +171,6 @@ impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>
         get_challenges::<F, C, D>(
             public_inputs_hash,
             wires_cap,
-            lookup_table_cap.as_ref(),
             plonk_zs_partial_products_cap,
             quotient_polys_cap,
             openings,
@@ -271,7 +263,6 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
         &mut self,
         public_inputs_hash: HashOutTarget,
         wires_cap: &MerkleCapTarget,
-        lookup_table_cap: Option<&MerkleCapTarget>,
         plonk_zs_partial_products_cap: &MerkleCapTarget,
         quotient_polys_cap: &MerkleCapTarget,
         openings: &OpeningSetTarget<D>,
@@ -300,9 +291,6 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
         challenger.observe_hash(&public_inputs_hash);
 
         challenger.observe_cap(wires_cap);
-        if let Some(cap) = lookup_table_cap {
-            challenger.observe_cap(cap);
-        }
 
         let plonk_betas = challenger.get_n_challenges(self, num_challenges);
         let plonk_gammas = challenger.get_n_challenges(self, num_challenges);
@@ -360,7 +348,6 @@ impl<const D: usize> ProofWithPublicInputsTarget<D> {
     {
         let ProofTarget {
             wires_cap,
-            lookup_table_cap,
             plonk_zs_partial_products_cap,
             quotient_polys_cap,
             openings,
@@ -376,7 +363,6 @@ impl<const D: usize> ProofWithPublicInputsTarget<D> {
         builder.get_challenges::<C>(
             public_inputs_hash,
             wires_cap,
-            lookup_table_cap.as_ref(),
             plonk_zs_partial_products_cap,
             quotient_polys_cap,
             openings,

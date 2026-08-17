@@ -118,12 +118,14 @@ pub mod default {
     use crate::gates::multiplication_base::MultiplicationBaseGenerator;
     use crate::gates::multiplication_extension::MulExtensionGenerator;
     use crate::gates::poseidon::PoseidonGenerator;
+    use crate::gates::poseidon2::Poseidon2Generator;
     use crate::gates::poseidon_mds::PoseidonMdsGenerator;
     use crate::gates::random_access::RandomAccessGenerator;
     use crate::gates::reducing::ReducingGenerator;
     use crate::gates::reducing_extension::ReducingGenerator as ReducingExtensionGenerator;
     use crate::gates::select_base::SelectionBaseGenerator;
     use crate::hash::hash_types::RichField;
+    use crate::hash::poseidon2::hash::Poseidon2;
     use crate::iop::generator::{
         ConstantGenerator, CopyGenerator, NonzeroTestGenerator, RandomValueGenerator,
     };
@@ -151,7 +153,7 @@ pub mod default {
 
     impl<F, C, const D: usize> WitnessGeneratorSerializer<F, D> for DefaultGeneratorSerializer<C, D>
     where
-        F: RichField + Extendable<D>,
+        F: RichField + Extendable<D> + Poseidon2,
         C: GenericConfig<D, F = F> + 'static,
         C::Hasher: AlgebraicHasher<F>,
     {
@@ -177,6 +179,7 @@ pub mod default {
             MulExtensionGenerator<F, D>,
             NonzeroTestGenerator,
             PoseidonGenerator<F, D>,
+            Poseidon2Generator<F, D>,
             PoseidonMdsGenerator<D>,
             QuotientGeneratorExtension<D>,
             RandomAccessGenerator<F, D>,

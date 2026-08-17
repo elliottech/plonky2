@@ -197,6 +197,8 @@ pub struct CircuitBuilder<F: RichField + Extendable<D>, const D: usize> {
     luts: Vec<LookupTable>,
     /// Whether each LUT is supplied at proving time instead of fixed in `CommonCircuitData`.
     pub(crate) dynamic_luts: Vec<bool>,
+    /// Public Poseidon digest target for each dynamic LUT; static LUTs have no digest target.
+    pub(crate) dynamic_lut_digests: Vec<Option<HashOutTarget>>,
 
     /// Optional common data. When it is `Some(goal_data)`, the `build` function panics if the resulting
     /// common data doesn't equal `goal_data`.
@@ -235,6 +237,7 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
             lut_to_lookups: Vec::new(),
             luts: Vec::new(),
             dynamic_luts: Vec::new(),
+            dynamic_lut_digests: Vec::new(),
             goal_common_data: None,
             verifier_data_public_input: None,
         };
@@ -771,6 +774,7 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
         } else {
             self.luts.push(lut);
             self.dynamic_luts.push(false);
+            self.dynamic_lut_digests.push(None);
             self.lut_to_lookups.push(vec![]);
             assert!(self.luts.len() == self.lut_to_lookups.len());
             self.luts.len() - 1
@@ -798,6 +802,7 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
         } else {
             self.luts.push(lut);
             self.dynamic_luts.push(false);
+            self.dynamic_lut_digests.push(None);
             self.lut_to_lookups.push(vec![]);
             assert!(self.luts.len() == self.lut_to_lookups.len());
             self.luts.len() - 1
@@ -812,6 +817,7 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
         } else {
             self.luts.push(table);
             self.dynamic_luts.push(false);
+            self.dynamic_lut_digests.push(None);
             self.lut_to_lookups.push(vec![]);
             assert!(self.luts.len() == self.lut_to_lookups.len());
             self.luts.len() - 1
@@ -830,6 +836,8 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
         );
         self.luts.push(placeholder);
         self.dynamic_luts.push(true);
+        let digest = self.add_virtual_hash_public_input();
+        self.dynamic_lut_digests.push(Some(digest));
         self.lut_to_lookups.push(vec![]);
         self.luts.len() - 1
     }
@@ -1166,7 +1174,7 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
         self.randomize_unused_pi_wires(pi_gate);
 
         // Place LUT-related gates.
-        self.add_all_lookups();
+        self.add_all_lookups::<C::InnerHasher>();
 
         // Make sure we have enough constant generators. If not, add a `ConstantGate`.
         while self.constants_to_targets.len() > self.constant_generators.len() {
