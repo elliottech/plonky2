@@ -34,6 +34,9 @@ use crate::util::serialization::{Buffer, Read, Write};
 pub struct Proof<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize> {
     /// Merkle cap of LDEs of wire values.
     pub wires_cap: MerkleCap<F, C::Hasher>,
+    /// Merkle cap of the lookup-table portion of the witness. Keeping this separate makes a
+    /// dynamic table commitment reusable and comparable across proofs of the same circuit.
+    pub lookup_table_cap: Option<MerkleCap<F, C::Hasher>>,
     /// Merkle cap of LDEs of Z, in the context of Plonk's permutation argument.
     pub plonk_zs_partial_products_cap: MerkleCap<F, C::Hasher>,
     /// Merkle cap of LDEs of the quotient polynomial components.
@@ -47,6 +50,7 @@ pub struct Proof<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProofTarget<const D: usize> {
     pub wires_cap: MerkleCapTarget,
+    pub lookup_table_cap: Option<MerkleCapTarget>,
     pub plonk_zs_partial_products_cap: MerkleCapTarget,
     pub quotient_polys_cap: MerkleCapTarget,
     pub openings: OpeningSetTarget<D>,
@@ -58,6 +62,7 @@ impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize> P
     pub fn compress(self, indices: &[usize], params: &FriParams) -> CompressedProof<F, C, D> {
         let Proof {
             wires_cap,
+            lookup_table_cap,
             plonk_zs_partial_products_cap,
             quotient_polys_cap,
             openings,
@@ -66,6 +71,7 @@ impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize> P
 
         CompressedProof {
             wires_cap,
+            lookup_table_cap,
             plonk_zs_partial_products_cap,
             quotient_polys_cap,
             openings,
@@ -133,6 +139,7 @@ pub struct CompressedProof<F: RichField + Extendable<D>, C: GenericConfig<D, F =
 {
     /// Merkle cap of LDEs of wire values.
     pub wires_cap: MerkleCap<F, C::Hasher>,
+    pub lookup_table_cap: Option<MerkleCap<F, C::Hasher>>,
     /// Merkle cap of LDEs of Z, in the context of Plonk's permutation argument.
     pub plonk_zs_partial_products_cap: MerkleCap<F, C::Hasher>,
     /// Merkle cap of LDEs of the quotient polynomial components.
@@ -155,6 +162,7 @@ impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>
     ) -> Proof<F, C, D> {
         let CompressedProof {
             wires_cap,
+            lookup_table_cap,
             plonk_zs_partial_products_cap,
             quotient_polys_cap,
             openings,
@@ -163,6 +171,7 @@ impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>
 
         Proof {
             wires_cap,
+            lookup_table_cap,
             plonk_zs_partial_products_cap,
             quotient_polys_cap,
             openings,
@@ -302,6 +311,7 @@ pub struct OpeningSet<F: RichField + Extendable<D>, const D: usize> {
     pub constants: Vec<F::Extension>,
     pub plonk_sigmas: Vec<F::Extension>,
     pub wires: Vec<F::Extension>,
+    pub lookup_table: Vec<F::Extension>,
     pub plonk_zs: Vec<F::Extension>,
     pub plonk_zs_next: Vec<F::Extension>,
     pub partial_products: Vec<F::Extension>,
@@ -316,6 +326,7 @@ impl<F: RichField + Extendable<D>, const D: usize> OpeningSet<F, D> {
         g: F::Extension,
         constants_sigmas_commitment: &PolynomialBatch<F, C, D>,
         wires_commitment: &PolynomialBatch<F, C, D>,
+        lookup_table_commitment: Option<&PolynomialBatch<F, C, D>>,
         zs_partial_products_lookup_commitment: &PolynomialBatch<F, C, D>,
         quotient_polys_commitment: &PolynomialBatch<F, C, D>,
         common_data: &CommonCircuitData<F, D>,
@@ -339,6 +350,9 @@ impl<F: RichField + Extendable<D>, const D: usize> OpeningSet<F, D> {
             constants: constants_sigmas_eval[common_data.constants_range()].to_vec(),
             plonk_sigmas: constants_sigmas_eval[common_data.sigmas_range()].to_vec(),
             wires: eval_commitment(zeta, wires_commitment),
+            lookup_table: lookup_table_commitment
+                .map(|commitment| eval_commitment(zeta, commitment))
+                .unwrap_or_default(),
             plonk_zs: zs_partial_products_lookup_eval[common_data.zs_range()].to_vec(),
             plonk_zs_next: zs_partial_products_lookup_next_eval[common_data.zs_range()].to_vec(),
             partial_products: zs_partial_products_lookup_eval[common_data.partial_products_range()]
@@ -357,6 +371,7 @@ impl<F: RichField + Extendable<D>, const D: usize> OpeningSet<F, D> {
                     self.constants.as_slice(),
                     self.plonk_sigmas.as_slice(),
                     self.wires.as_slice(),
+                    self.lookup_table.as_slice(),
                     self.plonk_zs.as_slice(),
                     self.partial_products.as_slice(),
                     self.quotient_polys.as_slice(),
@@ -370,6 +385,7 @@ impl<F: RichField + Extendable<D>, const D: usize> OpeningSet<F, D> {
                     self.constants.as_slice(),
                     self.plonk_sigmas.as_slice(),
                     self.wires.as_slice(),
+                    self.lookup_table.as_slice(),
                     self.plonk_zs.as_slice(),
                     self.partial_products.as_slice(),
                     self.quotient_polys.as_slice(),
@@ -398,6 +414,7 @@ pub struct OpeningSetTarget<const D: usize> {
     pub constants: Vec<ExtensionTarget<D>>,
     pub plonk_sigmas: Vec<ExtensionTarget<D>>,
     pub wires: Vec<ExtensionTarget<D>>,
+    pub lookup_table: Vec<ExtensionTarget<D>>,
     pub plonk_zs: Vec<ExtensionTarget<D>>,
     pub plonk_zs_next: Vec<ExtensionTarget<D>>,
     pub lookup_zs: Vec<ExtensionTarget<D>>,
@@ -415,6 +432,7 @@ impl<const D: usize> OpeningSetTarget<D> {
                     self.constants.as_slice(),
                     self.plonk_sigmas.as_slice(),
                     self.wires.as_slice(),
+                    self.lookup_table.as_slice(),
                     self.plonk_zs.as_slice(),
                     self.partial_products.as_slice(),
                     self.quotient_polys.as_slice(),
@@ -428,6 +446,7 @@ impl<const D: usize> OpeningSetTarget<D> {
                     self.constants.as_slice(),
                     self.plonk_sigmas.as_slice(),
                     self.wires.as_slice(),
+                    self.lookup_table.as_slice(),
                     self.plonk_zs.as_slice(),
                     self.partial_products.as_slice(),
                     self.quotient_polys.as_slice(),

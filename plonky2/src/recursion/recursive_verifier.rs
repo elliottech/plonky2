@@ -61,10 +61,20 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
         let one = self.one_extension();
 
         let local_constants = &proof.openings.constants;
-        let local_wires = &proof.openings.wires;
+        let local_wires = if proof.openings.lookup_table.is_empty() {
+            proof.openings.wires.clone()
+        } else {
+            proof
+                .openings
+                .wires
+                .iter()
+                .zip(&proof.openings.lookup_table)
+                .map(|(wire, table)| self.add_extension(*wire, *table))
+                .collect()
+        };
         let vars = EvaluationTargets {
             local_constants,
-            local_wires,
+            local_wires: &local_wires,
             public_inputs_hash: &public_inputs_hash,
         };
         let local_zs = &proof.openings.plonk_zs;
@@ -112,12 +122,17 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
             }
         });
 
-        let merkle_caps = &[
+        let mut merkle_caps = vec![
             inner_verifier_data.constants_sigmas_cap.clone(),
             proof.wires_cap.clone(),
+        ];
+        if let Some(cap) = &proof.lookup_table_cap {
+            merkle_caps.push(cap.clone());
+        }
+        merkle_caps.extend([
             proof.plonk_zs_partial_products_cap.clone(),
             proof.quotient_polys_cap.clone(),
-        ];
+        ]);
 
         let fri_instance = inner_common_data.get_fri_instance_target(self, challenges.plonk_zeta);
         with_context!(
@@ -127,7 +142,7 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
                 &fri_instance,
                 &proof.openings.to_fri_openings(),
                 &challenges.fri_challenges,
-                merkle_caps,
+                &merkle_caps,
                 &proof.opening_proof,
                 &inner_common_data.fri_params,
             )
@@ -155,8 +170,13 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
         let num_leaves_per_oracle = &mut vec![
             common_data.num_preprocessed_polys(),
             config.num_wires + salt,
-            common_data.num_zs_partial_products_polys() + common_data.num_all_lookup_polys() + salt,
         ];
+        if common_data.num_lookup_polys != 0 {
+            num_leaves_per_oracle.push(config.num_wires);
+        }
+        num_leaves_per_oracle.push(
+            common_data.num_zs_partial_products_polys() + common_data.num_all_lookup_polys() + salt,
+        );
 
         if common_data.num_quotient_polys() > 0 {
             num_leaves_per_oracle.push(common_data.num_quotient_polys() + salt);
@@ -164,6 +184,8 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
 
         ProofTarget {
             wires_cap: self.add_virtual_cap(cap_height),
+            lookup_table_cap: (common_data.num_lookup_polys != 0)
+                .then(|| self.add_virtual_cap(cap_height)),
             plonk_zs_partial_products_cap: self.add_virtual_cap(cap_height),
             quotient_polys_cap: self.add_virtual_cap(cap_height),
             openings: self.add_opening_set(common_data),
@@ -185,6 +207,11 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
             constants: self.add_virtual_extension_targets(common_data.num_constants),
             plonk_sigmas: self.add_virtual_extension_targets(config.num_routed_wires),
             wires: self.add_virtual_extension_targets(config.num_wires),
+            lookup_table: self.add_virtual_extension_targets(if has_lookup {
+                config.num_wires
+            } else {
+                0
+            }),
             plonk_zs: self.add_virtual_extension_targets(num_challenges),
             plonk_zs_next: self.add_virtual_extension_targets(num_challenges),
             lookup_zs: self.add_virtual_extension_targets(num_lookups),

@@ -408,6 +408,9 @@ pub fn check_lookup_constraints<F: RichField + Extendable<D>, const D: usize>(
 
     // Check final RE constraints for each different LUT.
     for r in LookupSelectors::StartEnd as usize..common_data.num_lookup_selectors {
+        if common_data.dynamic_luts[r - LookupSelectors::StartEnd as usize] {
+            continue;
+        }
         let cur_ends_selector = lookup_selectors[r];
         let lut_row_number = common_data.luts[r - LookupSelectors::StartEnd as usize]
             .len()
@@ -576,6 +579,9 @@ pub fn check_lookup_constraints_batch<F: RichField + Extendable<D>, const D: usi
 
     // Check final RE constraints for each different LUT.
     for r in LookupSelectors::StartEnd as usize..common_data.num_lookup_selectors {
+        if common_data.dynamic_luts[r - LookupSelectors::StartEnd as usize] {
+            continue;
+        }
         let cur_ends_selector = lookup_selectors[r];
 
         // Use the precomputed value for the lut poly evaluation
@@ -1038,6 +1044,9 @@ pub fn check_lookup_constraints_circuit<F: RichField + Extendable<D>, const D: u
 
     // Check final RE constraints for each different LUT.
     for r in LookupSelectors::StartEnd as usize..common_data.num_lookup_selectors {
+        if common_data.dynamic_luts[r - LookupSelectors::StartEnd as usize] {
+            continue;
+        }
         let cur_ends_selectors = lookup_selectors[r];
         let lut_row_number = common_data.luts[r - LookupSelectors::StartEnd as usize]
             .len()

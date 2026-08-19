@@ -49,10 +49,20 @@ pub(crate) fn verify_with_challenges<
     common_data: &CommonCircuitData<F, D>,
 ) -> Result<()> {
     let local_constants = &proof.openings.constants;
-    let local_wires = &proof.openings.wires;
+    let local_wires = if proof.openings.lookup_table.is_empty() {
+        proof.openings.wires.clone()
+    } else {
+        proof
+            .openings
+            .wires
+            .iter()
+            .zip(&proof.openings.lookup_table)
+            .map(|(wire, table)| *wire + *table)
+            .collect()
+    };
     let vars = EvaluationVars {
         local_constants,
-        local_wires,
+        local_wires: &local_wires,
         public_inputs_hash: &public_inputs_hash,
     };
     let local_zs = &proof.openings.plonk_zs;
@@ -97,19 +107,20 @@ pub(crate) fn verify_with_challenges<
         ensure!(vanishing_polys_zeta[i] == z_h_zeta * reduce_with_powers(chunk, zeta_pow_deg));
     }
 
-    let merkle_caps = &[
-        verifier_data.constants_sigmas_cap.clone(),
-        proof.wires_cap,
-        // In the lookup case, `plonk_zs_partial_products_cap` should also include the lookup commitment.
+    let mut merkle_caps = vec![verifier_data.constants_sigmas_cap.clone(), proof.wires_cap];
+    if let Some(cap) = proof.lookup_table_cap {
+        merkle_caps.push(cap);
+    }
+    merkle_caps.extend([
         proof.plonk_zs_partial_products_cap,
         proof.quotient_polys_cap,
-    ];
+    ]);
 
     verify_fri_proof::<F, C, D>(
         &common_data.get_fri_instance(challenges.plonk_zeta),
         &proof.openings.to_fri_openings(),
         &challenges.fri_challenges,
-        merkle_caps,
+        &merkle_caps,
         &proof.opening_proof,
         &common_data.fri_params,
     )?;

@@ -126,6 +126,163 @@ fn test_one_lookup() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[test]
+fn test_dynamic_lookup_table_commitment_is_separate() -> anyhow::Result<()> {
+    init_logger();
+
+    let config = CircuitConfig::standard_recursion_config();
+    let mut builder = CircuitBuilder::<F, D>::new(config);
+    let input = builder.add_virtual_target();
+    let output = builder.add_virtual_target();
+    let table_index = builder.add_dynamic_lookup_table(8);
+    builder.add_dynamic_lookup(input, output, table_index);
+    builder.register_public_input(input);
+    builder.register_public_input(output);
+
+    let data = builder.build::<C>();
+    let table: LookupTable = Arc::new((0..8).map(|i| (10 + i, 20 + i)).collect());
+
+    let prove_for = |input_value: u16, output_value: u16| {
+        let mut pw = PartialWitness::new();
+        pw.set_target(input, F::from_canonical_u16(input_value))?;
+        pw.set_target(output, F::from_canonical_u16(output_value))?;
+        data.prove_with_dynamic_lookup_tables(pw, core::slice::from_ref(&table))
+    };
+
+    let proof_a = prove_for(12, 22)?;
+    let proof_b = prove_for(15, 25)?;
+    data.verify(proof_a.clone()).expect("proof A");
+    data.verify(proof_b.clone()).expect("proof B");
+    assert_eq!(
+        proof_a.proof.lookup_table_cap,
+        proof_b.proof.lookup_table_cap
+    );
+
+    let changed_table: LookupTable = Arc::new(
+        (0..8)
+            .map(|i| {
+                let pair = (10 + i, 20 + i);
+                if i == 7 {
+                    (pair.0, 99)
+                } else {
+                    pair
+                }
+            })
+            .collect(),
+    );
+    let mut pw = PartialWitness::new();
+    pw.set_target(input, F::from_canonical_u16(12))?;
+    pw.set_target(output, F::from_canonical_u16(22))?;
+    let proof_c = data.prove_with_dynamic_lookup_tables(pw, &[changed_table])?;
+    data.verify(proof_c.clone()).expect("proof C");
+    assert_ne!(
+        proof_a.proof.lookup_table_cap,
+        proof_c.proof.lookup_table_cap
+    );
+
+    Ok(())
+}
+
+#[test]
+fn test_dynamic_lookup_rejects_unlisted_pair() -> anyhow::Result<()> {
+    let config = CircuitConfig::standard_recursion_config();
+    let mut builder = CircuitBuilder::<F, D>::new(config);
+    let input = builder.add_virtual_target();
+    let output = builder.add_virtual_target();
+    let table_index = builder.add_dynamic_lookup_table(2);
+    builder.add_dynamic_lookup(input, output, table_index);
+
+    let data = builder.build::<C>();
+    let table: LookupTable = Arc::new(vec![(10, 20), (11, 21)]);
+    let mut pw = PartialWitness::new();
+    pw.set_target(input, F::from_canonical_u16(10))?;
+    pw.set_target(output, F::from_canonical_u16(21))?;
+
+    assert!(data.prove_with_dynamic_lookup_tables(pw, &[table]).is_err());
+    Ok(())
+}
+
+#[test]
+fn test_dynamic_lookup_requires_output_witness() -> anyhow::Result<()> {
+    let config = CircuitConfig::standard_recursion_config();
+    let mut builder = CircuitBuilder::<F, D>::new(config);
+    let input = builder.add_virtual_target();
+    let output = builder.add_virtual_target();
+    let table_index = builder.add_dynamic_lookup_table(2);
+    builder.add_dynamic_lookup(input, output, table_index);
+
+    let data = builder.build::<C>();
+    let table: LookupTable = Arc::new(vec![(10, 20), (11, 21)]);
+    let mut pw = PartialWitness::new();
+    pw.set_target(input, F::from_canonical_u16(10))?;
+
+    let error = data
+        .prove_with_dynamic_lookup_tables(pw, &[table])
+        .unwrap_err();
+    assert!(error.to_string().contains("lookup output is missing"));
+    Ok(())
+}
+
+#[test]
+fn test_dynamic_lookup_reported_double_table() -> anyhow::Result<()> {
+    let config = CircuitConfig::standard_recursion_config();
+    let mut builder = CircuitBuilder::<F, D>::new(config);
+    let input = builder.add_virtual_target();
+    let output = builder.add_virtual_target();
+    let table_index = builder.add_dynamic_lookup_table(8);
+    builder.add_dynamic_lookup(input, output, table_index);
+    builder.register_public_input(input);
+    builder.register_public_input(output);
+
+    let data = builder.build::<C>();
+    let table: LookupTable = Arc::new(vec![
+        (0, 0),
+        (1, 2),
+        (2, 4),
+        (3, 6),
+        (4, 8),
+        (5, 10),
+        (6, 12),
+        (7, 14),
+    ]);
+    let mut pw = PartialWitness::new();
+    pw.set_target(input, F::from_canonical_u16(7))?;
+    pw.set_target(output, F::from_canonical_u16(14))?;
+
+    let proof = data.prove_with_dynamic_lookup_tables(pw, &[table])?;
+    data.verify(proof)
+}
+
+#[test]
+fn test_dynamic_lookup_bitmap_changes_circuit_digest() {
+    let identity_table: LookupTable = Arc::new((0..8).map(|i| (i, i)).collect());
+
+    let config = CircuitConfig::standard_recursion_config();
+    let mut fixed_dynamic = CircuitBuilder::<F, D>::new(config.clone());
+    let fixed_input = fixed_dynamic.add_virtual_target();
+    let fixed_index = fixed_dynamic.add_lookup_table_from_pairs(identity_table);
+    fixed_dynamic.add_lookup_from_index(fixed_input, fixed_index);
+    let dynamic_input = fixed_dynamic.add_virtual_target();
+    let dynamic_output = fixed_dynamic.add_virtual_target();
+    let dynamic_index = fixed_dynamic.add_dynamic_lookup_table(8);
+    fixed_dynamic.add_dynamic_lookup(dynamic_input, dynamic_output, dynamic_index);
+    let fixed_dynamic = fixed_dynamic.build::<C>();
+
+    let mut dynamic_dynamic = CircuitBuilder::<F, D>::new(config);
+    for _ in 0..2 {
+        let input = dynamic_dynamic.add_virtual_target();
+        let output = dynamic_dynamic.add_virtual_target();
+        let table_index = dynamic_dynamic.add_dynamic_lookup_table(8);
+        dynamic_dynamic.add_dynamic_lookup(input, output, table_index);
+    }
+    let dynamic_dynamic = dynamic_dynamic.build::<C>();
+
+    assert_ne!(
+        fixed_dynamic.verifier_only.circuit_digest,
+        dynamic_dynamic.verifier_only.circuit_digest
+    );
+}
+
 // Tests one lookup in two different lookup tables.
 #[test]
 fn test_two_luts() -> anyhow::Result<()> {

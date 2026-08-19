@@ -47,6 +47,22 @@ pub const OTHER_TABLE: [u16; 256] = [
 pub const SMALLER_TABLE: [u16; 8] = [2, 24, 56, 100, 128, 16, 20, 49];
 
 impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
+    /// Registers a dynamic lookup table with a circuit-fixed length and prover-supplied entries.
+    pub fn add_dynamic_lookup_table(&mut self, table_len: usize) -> usize {
+        self.update_dynamic_lut(table_len)
+    }
+
+    /// Registers a lookup request against a dynamic table. The caller supplies/constrains both
+    /// input and output targets; unlike `add_lookup_from_index`, no fixed-table generator is used.
+    pub fn add_dynamic_lookup(
+        &mut self,
+        looking_in: Target,
+        looking_out: Target,
+        lut_index: usize,
+    ) {
+        assert!(self.dynamic_luts[lut_index]);
+        self.update_lookups(looking_in, looking_out, lut_index);
+    }
     /// Adds a lookup table to the list of stored lookup tables `self.luts` based on a table of (input, output) pairs. It returns the index of the LUT within `self.luts`.
     pub fn add_lookup_table_from_pairs(&mut self, table: LookupTable) -> usize {
         self.update_luts_from_pairs(table)
@@ -92,7 +108,11 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
 
                 let lookups = self.get_lut_lookups(lut_index).to_owned();
 
-                let gate = LookupGate::new_from_table(&self.config, lut.clone());
+                let gate = if self.dynamic_luts[lut_index] {
+                    LookupGate::new_dynamic(&self.config, lut.clone())
+                } else {
+                    LookupGate::new_from_table(&self.config, lut.clone())
+                };
                 let num_slots = LookupGate::num_slots(&self.config);
 
                 // Given the number of lookups and the number of slots for each gate, it is possible
@@ -130,8 +150,11 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
                 let last_lut_gate = self.num_gates();
                 let num_lut_entries = LookupTableGate::num_slots(&self.config);
                 let num_lut_rows = (self.get_luts_idx_length(lut_index) - 1) / num_lut_entries + 1;
-                let gate =
-                    LookupTableGate::new_from_table(&self.config, lut.clone(), last_lut_gate);
+                let gate = if self.dynamic_luts[lut_index] {
+                    LookupTableGate::new_dynamic(&self.config, lut.clone(), last_lut_gate)
+                } else {
+                    LookupTableGate::new_from_table(&self.config, lut.clone(), last_lut_gate)
+                };
                 // Also instances of `LookupTableGate` can be placed with the `add_gate` function
                 // rather than being instantiated slot by slot; note that in this case there is no
                 // need to separately handle the last chunk of LUT entries that cannot fill all the

@@ -352,6 +352,12 @@ pub trait Read {
         let constants = self.read_field_ext_vec::<F, D>(common_data.num_constants)?;
         let plonk_sigmas = self.read_field_ext_vec::<F, D>(config.num_routed_wires)?;
         let wires = self.read_field_ext_vec::<F, D>(config.num_wires)?;
+        let lookup_table =
+            self.read_field_ext_vec::<F, D>(if common_data.num_lookup_polys == 0 {
+                0
+            } else {
+                config.num_wires
+            })?;
         let plonk_zs = self.read_field_ext_vec::<F, D>(config.num_challenges)?;
         let plonk_zs_next = self.read_field_ext_vec::<F, D>(config.num_challenges)?;
         let lookup_zs = self.read_field_ext_vec::<F, D>(common_data.num_all_lookup_polys())?;
@@ -365,6 +371,7 @@ pub trait Read {
             constants,
             plonk_sigmas,
             wires,
+            lookup_table,
             plonk_zs,
             plonk_zs_next,
             partial_products,
@@ -380,6 +387,7 @@ pub trait Read {
         let constants = self.read_target_ext_vec::<D>()?;
         let plonk_sigmas = self.read_target_ext_vec::<D>()?;
         let wires = self.read_target_ext_vec::<D>()?;
+        let lookup_table = self.read_target_ext_vec::<D>()?;
         let plonk_zs = self.read_target_ext_vec::<D>()?;
         let plonk_zs_next = self.read_target_ext_vec::<D>()?;
         let lookup_zs = self.read_target_ext_vec::<D>()?;
@@ -391,6 +399,7 @@ pub trait Read {
             constants,
             plonk_sigmas,
             wires,
+            lookup_table,
             plonk_zs,
             plonk_zs_next,
             lookup_zs,
@@ -774,6 +783,10 @@ pub trait Read {
         for _ in 0..length {
             luts.push(Arc::new(self.read_lut()?));
         }
+        let dynamic_luts_len = self.read_usize()?;
+        let dynamic_luts = (0..dynamic_luts_len)
+            .map(|_| self.read_bool())
+            .collect::<IoResult<Vec<_>>>()?;
 
         let gates_len = self.read_usize()?;
         let mut gates = Vec::with_capacity(gates_len);
@@ -794,6 +807,7 @@ pub trait Read {
             num_lookup_polys,
             num_lookup_selectors,
             luts,
+            dynamic_luts,
         };
 
         for _ in 0..gates_len {
@@ -978,12 +992,18 @@ pub trait Read {
     {
         let config = &common_data.config;
         let wires_cap = self.read_merkle_cap(config.fri_config.cap_height)?;
+        let lookup_table_cap = if common_data.num_lookup_polys == 0 {
+            None
+        } else {
+            Some(self.read_merkle_cap(config.fri_config.cap_height)?)
+        };
         let plonk_zs_partial_products_cap = self.read_merkle_cap(config.fri_config.cap_height)?;
         let quotient_polys_cap = self.read_merkle_cap(config.fri_config.cap_height)?;
         let openings = self.read_opening_set::<F, C, D>(common_data)?;
         let opening_proof = self.read_fri_proof::<F, C, D>(common_data)?;
         Ok(Proof {
             wires_cap,
+            lookup_table_cap,
             plonk_zs_partial_products_cap,
             quotient_polys_cap,
             openings,
@@ -995,12 +1015,16 @@ pub trait Read {
     #[inline]
     fn read_target_proof<const D: usize>(&mut self) -> IoResult<ProofTarget<D>> {
         let wires_cap = self.read_target_merkle_cap()?;
+        let lookup_table_cap = (self.read_u8()? != 0)
+            .then(|| self.read_target_merkle_cap())
+            .transpose()?;
         let plonk_zs_partial_products_cap = self.read_target_merkle_cap()?;
         let quotient_polys_cap = self.read_target_merkle_cap()?;
         let openings = self.read_target_opening_set::<D>()?;
         let opening_proof = self.read_target_fri_proof::<D>()?;
         Ok(ProofTarget {
             wires_cap,
+            lookup_table_cap,
             plonk_zs_partial_products_cap,
             quotient_polys_cap,
             openings,
@@ -1128,12 +1152,18 @@ pub trait Read {
     {
         let config = &common_data.config;
         let wires_cap = self.read_merkle_cap(config.fri_config.cap_height)?;
+        let lookup_table_cap = if common_data.num_lookup_polys == 0 {
+            None
+        } else {
+            Some(self.read_merkle_cap(config.fri_config.cap_height)?)
+        };
         let plonk_zs_partial_products_cap = self.read_merkle_cap(config.fri_config.cap_height)?;
         let quotient_polys_cap = self.read_merkle_cap(config.fri_config.cap_height)?;
         let openings = self.read_opening_set::<F, C, D>(common_data)?;
         let opening_proof = self.read_compressed_fri_proof::<F, C, D>(common_data)?;
         Ok(CompressedProof {
             wires_cap,
+            lookup_table_cap,
             plonk_zs_partial_products_cap,
             quotient_polys_cap,
             openings,
@@ -1442,6 +1472,7 @@ pub trait Write {
         self.write_field_ext_vec::<F, D>(&os.constants)?;
         self.write_field_ext_vec::<F, D>(&os.plonk_sigmas)?;
         self.write_field_ext_vec::<F, D>(&os.wires)?;
+        self.write_field_ext_vec::<F, D>(&os.lookup_table)?;
         self.write_field_ext_vec::<F, D>(&os.plonk_zs)?;
         self.write_field_ext_vec::<F, D>(&os.plonk_zs_next)?;
         self.write_field_ext_vec::<F, D>(&os.lookup_zs)?;
@@ -1459,6 +1490,7 @@ pub trait Write {
         self.write_target_ext_vec::<D>(&os.constants)?;
         self.write_target_ext_vec::<D>(&os.plonk_sigmas)?;
         self.write_target_ext_vec::<D>(&os.wires)?;
+        self.write_target_ext_vec::<D>(&os.lookup_table)?;
         self.write_target_ext_vec::<D>(&os.plonk_zs)?;
         self.write_target_ext_vec::<D>(&os.plonk_zs_next)?;
         self.write_target_ext_vec::<D>(&os.lookup_zs)?;
@@ -1785,6 +1817,7 @@ pub trait Write {
             num_lookup_polys,
             num_lookup_selectors,
             luts,
+            dynamic_luts,
         } = common_data;
 
         self.write_circuit_config(config)?;
@@ -1806,6 +1839,10 @@ pub trait Write {
         self.write_usize(luts.len())?;
         for lut in luts.iter() {
             self.write_lut(lut)?;
+        }
+        self.write_usize(dynamic_luts.len())?;
+        for &dynamic in dynamic_luts {
+            self.write_bool(dynamic)?;
         }
 
         self.write_usize(gates.len())?;
@@ -1984,6 +2021,9 @@ pub trait Write {
         C: GenericConfig<D, F = F>,
     {
         self.write_merkle_cap(&proof.wires_cap)?;
+        if let Some(cap) = &proof.lookup_table_cap {
+            self.write_merkle_cap(cap)?;
+        }
         self.write_merkle_cap(&proof.plonk_zs_partial_products_cap)?;
         self.write_merkle_cap(&proof.quotient_polys_cap)?;
         self.write_opening_set(&proof.openings)?;
@@ -1994,6 +2034,10 @@ pub trait Write {
     #[inline]
     fn write_target_proof<const D: usize>(&mut self, proof: &ProofTarget<D>) -> IoResult<()> {
         self.write_target_merkle_cap(&proof.wires_cap)?;
+        self.write_u8(proof.lookup_table_cap.is_some() as u8)?;
+        if let Some(cap) = &proof.lookup_table_cap {
+            self.write_target_merkle_cap(cap)?;
+        }
         self.write_target_merkle_cap(&proof.plonk_zs_partial_products_cap)?;
         self.write_target_merkle_cap(&proof.quotient_polys_cap)?;
         self.write_target_opening_set(&proof.openings)?;
@@ -2090,6 +2134,9 @@ pub trait Write {
         C: GenericConfig<D, F = F>,
     {
         self.write_merkle_cap(&proof.wires_cap)?;
+        if let Some(cap) = &proof.lookup_table_cap {
+            self.write_merkle_cap(cap)?;
+        }
         self.write_merkle_cap(&proof.plonk_zs_partial_products_cap)?;
         self.write_merkle_cap(&proof.quotient_polys_cap)?;
         self.write_opening_set(&proof.openings)?;
