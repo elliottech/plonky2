@@ -199,8 +199,6 @@ pub struct CircuitBuilder<F: RichField + Extendable<D>, const D: usize> {
     pub(crate) dynamic_luts: Vec<bool>,
     /// Public Poseidon digest target for each dynamic LUT; static LUTs have no digest target.
     pub(crate) dynamic_lut_digests: Vec<Option<HashOutTarget>>,
-    /// Whether each dynamic LUT exposes one packed public input per table entry.
-    pub(crate) dynamic_lut_public_inputs: Vec<bool>,
     /// Packed public-input targets for dynamic LUT entries, when requested.
     pub(crate) dynamic_lut_public_input_targets: Vec<Option<Vec<Target>>>,
 
@@ -242,7 +240,6 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
             luts: Vec::new(),
             dynamic_luts: Vec::new(),
             dynamic_lut_digests: Vec::new(),
-            dynamic_lut_public_inputs: Vec::new(),
             dynamic_lut_public_input_targets: Vec::new(),
             goal_common_data: None,
             verifier_data_public_input: None,
@@ -751,6 +748,27 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
         self.luts.iter().position(|elt| *elt == lut)
     }
 
+    fn is_static_lut_stored(&self, lut: &LookupTable) -> Option<usize> {
+        self.luts
+            .iter()
+            .zip(&self.dynamic_luts)
+            .position(|(stored, &dynamic)| !dynamic && stored == lut)
+    }
+
+    fn store_static_lut(&mut self, lut: LookupTable) -> usize {
+        if let Some(index) = self.is_static_lut_stored(&lut) {
+            return index;
+        }
+
+        self.luts.push(lut);
+        self.dynamic_luts.push(false);
+        self.dynamic_lut_digests.push(None);
+        self.dynamic_lut_public_input_targets.push(None);
+        self.lut_to_lookups.push(vec![]);
+        debug_assert_eq!(self.luts.len(), self.lut_to_lookups.len());
+        self.luts.len() - 1
+    }
+
     /// Returns the LUT at index `idx`.
     pub fn get_lut(&self, idx: usize) -> LookupTable {
         assert!(
@@ -773,20 +791,7 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
     /// Given a function `f: fn(u16) -> u16`, adds a LUT to the circuit builder.
     pub fn update_luts_from_fn(&mut self, f: fn(u16) -> u16, inputs: &[u16]) -> usize {
         let lut = Arc::new(Self::get_lut_from_fn::<u16>(f, inputs));
-
-        // If the LUT `lut` is already stored in `self.luts`, return its index. Otherwise, append `table` to `self.luts` and return its index.
-        if let Some(idx) = self.is_stored(lut.clone()) {
-            idx
-        } else {
-            self.luts.push(lut);
-            self.dynamic_luts.push(false);
-            self.dynamic_lut_digests.push(None);
-            self.dynamic_lut_public_inputs.push(false);
-            self.dynamic_lut_public_input_targets.push(None);
-            self.lut_to_lookups.push(vec![]);
-            assert!(self.luts.len() == self.lut_to_lookups.len());
-            self.luts.len() - 1
-        }
+        self.store_static_lut(lut)
     }
 
     /// Adds a table to the vector of LUTs in the circuit builder, given a list of inputs and table values.
@@ -803,37 +808,12 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
             .zip_eq(table.iter().copied())
             .collect();
         let lut: LookupTable = Arc::new(pairs);
-
-        // If the LUT `lut` is already stored in `self.luts`, return its index. Otherwise, append `table` to `self.luts` and return its index.
-        if let Some(idx) = self.is_stored(lut.clone()) {
-            idx
-        } else {
-            self.luts.push(lut);
-            self.dynamic_luts.push(false);
-            self.dynamic_lut_digests.push(None);
-            self.dynamic_lut_public_inputs.push(false);
-            self.dynamic_lut_public_input_targets.push(None);
-            self.lut_to_lookups.push(vec![]);
-            assert!(self.luts.len() == self.lut_to_lookups.len());
-            self.luts.len() - 1
-        }
+        self.store_static_lut(lut)
     }
 
     /// Adds a table to the vector of LUTs in the circuit builder.
     pub fn update_luts_from_pairs(&mut self, table: LookupTable) -> usize {
-        // If the LUT `table` is already stored in `self.luts`, return its index. Otherwise, append `table` to `self.luts` and return its index.
-        if let Some(idx) = self.is_stored(table.clone()) {
-            idx
-        } else {
-            self.luts.push(table);
-            self.dynamic_luts.push(false);
-            self.dynamic_lut_digests.push(None);
-            self.dynamic_lut_public_inputs.push(false);
-            self.dynamic_lut_public_input_targets.push(None);
-            self.lut_to_lookups.push(vec![]);
-            assert!(self.luts.len() == self.lut_to_lookups.len());
-            self.luts.len() - 1
-        }
+        self.store_static_lut(table)
     }
 
     /// Adds a lookup table whose values are supplied to `prove_with_dynamic_lookup_tables`.
@@ -850,7 +830,6 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
         self.dynamic_luts.push(true);
         let digest = self.add_virtual_hash_public_input();
         self.dynamic_lut_digests.push(Some(digest));
-        self.dynamic_lut_public_inputs.push(false);
         self.dynamic_lut_public_input_targets.push(None);
         self.lut_to_lookups.push(vec![]);
         self.luts.len() - 1
@@ -868,7 +847,6 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
         self.luts.push(placeholder);
         self.dynamic_luts.push(true);
         self.dynamic_lut_digests.push(None);
-        self.dynamic_lut_public_inputs.push(true);
         let public_inputs = (0..table_len)
             .map(|_| self.add_virtual_public_input())
             .collect();

@@ -189,6 +189,43 @@ fn test_dynamic_lookup_table_digest_is_public() -> anyhow::Result<()> {
 }
 
 #[test]
+fn test_static_table_does_not_alias_dynamic_placeholder() {
+    let config = CircuitConfig::standard_recursion_config();
+    let mut builder = CircuitBuilder::<F, D>::new(config);
+    let dynamic_index = builder.add_dynamic_lookup_table(8);
+    let identity_table: LookupTable = Arc::new((0..8).map(|i| (i, i)).collect());
+    let static_index = builder.add_lookup_table_from_pairs(identity_table);
+
+    assert_ne!(dynamic_index, static_index);
+}
+
+#[test]
+fn test_dynamic_lookup_with_prover_circuit_data() -> anyhow::Result<()> {
+    let config = CircuitConfig::standard_recursion_config();
+    let mut builder = CircuitBuilder::<F, D>::new(config);
+    let input = builder.add_virtual_target();
+    let output = builder.add_virtual_target();
+    let table_index = builder.add_dynamic_lookup_table(2);
+    let table_digest = builder.dynamic_lookup_table_digest(table_index);
+    builder.add_dynamic_lookup(input, output, table_index);
+
+    let data = builder.build::<C>();
+    let verifier_data = data.verifier_data();
+    let prover_data = data.prover_data();
+    let table: LookupTable = Arc::new(vec![(10, 20), (11, 21)]);
+    let mut pw = PartialWitness::new();
+    pw.set_target(input, F::from_canonical_u16(11))?;
+    pw.set_target(output, F::from_canonical_u16(21))?;
+    pw.set_hash_target(
+        table_digest,
+        hash_dynamic_lookup_table::<F, H>(table_index, &table),
+    )?;
+
+    let proof = prover_data.prove_with_dynamic_lookup_tables(pw, &[table])?;
+    verifier_data.verify(proof)
+}
+
+#[test]
 fn test_dynamic_lookup_rejects_unlisted_pair() -> anyhow::Result<()> {
     let config = CircuitConfig::standard_recursion_config();
     let mut builder = CircuitBuilder::<F, D>::new(config);

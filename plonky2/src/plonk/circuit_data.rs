@@ -334,6 +334,22 @@ impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>
             &mut TimingTree::default(),
         )
     }
+
+    /// Proves a circuit with runtime lookup tables. Each supplied table must match the
+    /// circuit-fixed length; static tables cannot be overridden.
+    pub fn prove_with_dynamic_lookup_tables(
+        &self,
+        inputs: PartialWitness<F>,
+        lookup_tables: &[LookupTable],
+    ) -> Result<ProofWithPublicInputs<F, C, D>> {
+        prove_with_dynamic_lookup_tables::<F, C, D>(
+            &self.prover_only,
+            &self.common,
+            inputs,
+            lookup_tables,
+            &mut TimingTree::default(),
+        )
+    }
 }
 
 /// Circuit data required by the prover.

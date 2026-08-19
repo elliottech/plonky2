@@ -206,14 +206,8 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
                     for lut_entry in 0..lut.len() {
                         let row = first_lut_gate - lut_entry / num_lut_entries;
                         let slot = lut_entry % num_lut_entries;
-                        let input = Target::wire(
-                            row,
-                            LookupTableGate::wire_ith_looked_inp(slot),
-                        );
-                        let output = Target::wire(
-                            row,
-                            LookupTableGate::wire_ith_looked_out(slot),
-                        );
+                        let input = Target::wire(row, LookupTableGate::wire_ith_looked_inp(slot));
+                        let output = Target::wire(row, LookupTableGate::wire_ith_looked_out(slot));
                         let packed = self.mul_const_add(output_weight, output, input);
                         self.connect(packed, public_inputs[lut_entry]);
                     }

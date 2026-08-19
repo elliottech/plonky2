@@ -16,7 +16,7 @@ use crate::field::types::Field;
 use crate::field::zero_poly_coset::ZeroPolyOnCoset;
 use crate::fri::oracle::PolynomialBatch;
 use crate::gates::lookup::LookupGate;
-use crate::gates::lookup_table::LookupTableGate;
+use crate::gates::lookup_table::{LookupTable, LookupTableGate};
 use crate::gates::selectors::LookupSelectors;
 use crate::hash::hash_types::RichField;
 use crate::iop::challenger::Challenger;
@@ -35,6 +35,29 @@ use crate::util::partial_products::{partial_products_and_z_gx, quotient_chunk_pr
 use crate::util::timing::TimingTree;
 use crate::util::{log2_ceil, transpose};
 
+fn validate_lookup_tables<F: RichField + Extendable<D>, const D: usize>(
+    common_data: &CommonCircuitData<F, D>,
+    lookup_tables: &[LookupTable],
+) -> Result<()> {
+    ensure!(
+        lookup_tables.len() == common_data.luts.len(),
+        "wrong number of lookup tables"
+    );
+    for (index, table) in lookup_tables.iter().enumerate() {
+        ensure!(
+            table.len() == common_data.luts[index].len(),
+            "lookup table length differs from circuit shape"
+        );
+        if !common_data.dynamic_luts[index] {
+            ensure!(
+                table == &common_data.luts[index],
+                "cannot override a static lookup table"
+            );
+        }
+    }
+    Ok(())
+}
+
 fn set_dynamic_lookup_table_wires<
     F: RichField + Extendable<D>,
     C: GenericConfig<D, F = F>,
@@ -42,7 +65,7 @@ fn set_dynamic_lookup_table_wires<
 >(
     prover_data: &ProverOnlyCircuitData<F, C, D>,
     common_data: &CommonCircuitData<F, D>,
-    lookup_tables: &[crate::gates::lookup_table::LookupTable],
+    lookup_tables: &[LookupTable],
     inputs: &mut PartialWitness<F>,
 ) -> Result<()> {
     let num_lut_entries = LookupTableGate::num_slots(&common_data.config);
@@ -86,9 +109,10 @@ pub fn set_lookup_wires<
 >(
     prover_data: &ProverOnlyCircuitData<F, C, D>,
     common_data: &CommonCircuitData<F, D>,
-    lookup_tables: &[crate::gates::lookup_table::LookupTable],
+    lookup_tables: &[LookupTable],
     pw: &mut PartitionWitness<F>,
 ) -> Result<()> {
+    validate_lookup_tables(common_data, lookup_tables)?;
     for (
         lut_index,
         &LookupWire {
@@ -100,10 +124,6 @@ pub fn set_lookup_wires<
     {
         let lut = &lookup_tables[lut_index];
         let lut_len = lut.len();
-        ensure!(
-            lut_len == common_data.luts[lut_index].len(),
-            "lookup table length differs from circuit shape"
-        );
         let num_entries = LookupGate::num_slots(&common_data.config);
         let num_lut_entries = LookupTableGate::num_slots(&common_data.config);
 
@@ -152,30 +172,9 @@ pub fn set_lookup_wires<
             let col = lut_entry % num_lut_entries;
 
             let mul_target = Target::wire(row, LookupTableGate::wire_ith_multiplicity(col));
-
-            let inp_target = Target::wire(row, LookupTableGate::wire_ith_looked_inp(col));
-            let out_target = Target::wire(row, LookupTableGate::wire_ith_looked_out(col));
-            let (input, output) = lut[lut_entry];
-            pw.set_target(inp_target, F::from_canonical_u16(input))?;
-            pw.set_target(out_target, F::from_canonical_u16(output))?;
-
             pw.set_target(
                 mul_target,
                 F::from_canonical_usize(multiplicities[lut_entry]),
-            )?;
-        }
-
-        let padded_len = (first_lut_gate - last_lut_gate + 1) * num_lut_entries;
-        for lut_entry in lut_len..padded_len {
-            let row = first_lut_gate - lut_entry / num_lut_entries;
-            let col = lut_entry % num_lut_entries;
-            pw.set_target(
-                Target::wire(row, LookupTableGate::wire_ith_looked_inp(col)),
-                F::from_canonical_u16(first_inp_value),
-            )?;
-            pw.set_target(
-                Target::wire(row, LookupTableGate::wire_ith_looked_out(col)),
-                F::from_canonical_u16(first_out_value),
             )?;
         }
     }
@@ -208,29 +207,14 @@ pub fn prove_with_dynamic_lookup_tables<
     prover_data: &ProverOnlyCircuitData<F, C, D>,
     common_data: &CommonCircuitData<F, D>,
     mut inputs: PartialWitness<F>,
-    lookup_tables: &[crate::gates::lookup_table::LookupTable],
+    lookup_tables: &[LookupTable],
     timing: &mut TimingTree,
 ) -> Result<ProofWithPublicInputs<F, C, D>>
 where
     C::Hasher: Hasher<F>,
     C::InnerHasher: Hasher<F>,
 {
-    ensure!(
-        lookup_tables.len() == common_data.luts.len(),
-        "wrong number of lookup tables"
-    );
-    for (index, table) in lookup_tables.iter().enumerate() {
-        ensure!(
-            table.len() == common_data.luts[index].len(),
-            "lookup table length differs from circuit shape"
-        );
-        if !common_data.dynamic_luts[index] {
-            ensure!(
-                table == &common_data.luts[index],
-                "cannot override a static lookup table"
-            );
-        }
-    }
+    validate_lookup_tables(common_data, lookup_tables)?;
     set_dynamic_lookup_table_wires(prover_data, common_data, lookup_tables, &mut inputs)?;
     let partition_witness = timed!(
         timing,
@@ -282,7 +266,7 @@ fn prove_with_partition_witness_and_lookup_tables<
     prover_data: &ProverOnlyCircuitData<F, C, D>,
     common_data: &CommonCircuitData<F, D>,
     mut partition_witness: PartitionWitness<F>,
-    lookup_tables: &[crate::gates::lookup_table::LookupTable],
+    lookup_tables: &[LookupTable],
     timing: &mut TimingTree,
 ) -> Result<ProofWithPublicInputs<F, C, D>>
 where
