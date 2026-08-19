@@ -76,6 +76,11 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
         self.update_dynamic_lut(table_len)
     }
 
+    /// Registers a dynamic table and exposes each `(u16, u16)` entry as one packed public input.
+    pub fn add_dynamic_lookup_table_public_inputs(&mut self, table_len: usize) -> usize {
+        self.update_dynamic_public_lut(table_len)
+    }
+
     /// Returns the public input target containing the digest of a dynamic lookup table.
     pub fn dynamic_lookup_table_digest(&self, lut_index: usize) -> HashOutTarget {
         self.dynamic_lut_digests[lut_index].expect("lookup table is not dynamic")
@@ -193,6 +198,26 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
                 }
 
                 let first_lut_gate = self.num_gates() - 1;
+
+                if let Some(public_inputs) =
+                    self.dynamic_lut_public_input_targets[lut_index].clone()
+                {
+                    let output_weight = F::from_canonical_u64(1 << 16);
+                    for lut_entry in 0..lut.len() {
+                        let row = first_lut_gate - lut_entry / num_lut_entries;
+                        let slot = lut_entry % num_lut_entries;
+                        let input = Target::wire(
+                            row,
+                            LookupTableGate::wire_ith_looked_inp(slot),
+                        );
+                        let output = Target::wire(
+                            row,
+                            LookupTableGate::wire_ith_looked_out(slot),
+                        );
+                        let packed = self.mul_const_add(output_weight, output, input);
+                        self.connect(packed, public_inputs[lut_entry]);
+                    }
+                }
 
                 if let Some(expected_digest) = self.dynamic_lut_digests[lut_index] {
                     let mut hash_input = vec![

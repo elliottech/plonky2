@@ -199,6 +199,10 @@ pub struct CircuitBuilder<F: RichField + Extendable<D>, const D: usize> {
     pub(crate) dynamic_luts: Vec<bool>,
     /// Public Poseidon digest target for each dynamic LUT; static LUTs have no digest target.
     pub(crate) dynamic_lut_digests: Vec<Option<HashOutTarget>>,
+    /// Whether each dynamic LUT exposes one packed public input per table entry.
+    pub(crate) dynamic_lut_public_inputs: Vec<bool>,
+    /// Packed public-input targets for dynamic LUT entries, when requested.
+    pub(crate) dynamic_lut_public_input_targets: Vec<Option<Vec<Target>>>,
 
     /// Optional common data. When it is `Some(goal_data)`, the `build` function panics if the resulting
     /// common data doesn't equal `goal_data`.
@@ -238,6 +242,8 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
             luts: Vec::new(),
             dynamic_luts: Vec::new(),
             dynamic_lut_digests: Vec::new(),
+            dynamic_lut_public_inputs: Vec::new(),
+            dynamic_lut_public_input_targets: Vec::new(),
             goal_common_data: None,
             verifier_data_public_input: None,
         };
@@ -775,6 +781,8 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
             self.luts.push(lut);
             self.dynamic_luts.push(false);
             self.dynamic_lut_digests.push(None);
+            self.dynamic_lut_public_inputs.push(false);
+            self.dynamic_lut_public_input_targets.push(None);
             self.lut_to_lookups.push(vec![]);
             assert!(self.luts.len() == self.lut_to_lookups.len());
             self.luts.len() - 1
@@ -803,6 +811,8 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
             self.luts.push(lut);
             self.dynamic_luts.push(false);
             self.dynamic_lut_digests.push(None);
+            self.dynamic_lut_public_inputs.push(false);
+            self.dynamic_lut_public_input_targets.push(None);
             self.lut_to_lookups.push(vec![]);
             assert!(self.luts.len() == self.lut_to_lookups.len());
             self.luts.len() - 1
@@ -818,6 +828,8 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
             self.luts.push(table);
             self.dynamic_luts.push(false);
             self.dynamic_lut_digests.push(None);
+            self.dynamic_lut_public_inputs.push(false);
+            self.dynamic_lut_public_input_targets.push(None);
             self.lut_to_lookups.push(vec![]);
             assert!(self.luts.len() == self.lut_to_lookups.len());
             self.luts.len() - 1
@@ -838,6 +850,30 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
         self.dynamic_luts.push(true);
         let digest = self.add_virtual_hash_public_input();
         self.dynamic_lut_digests.push(Some(digest));
+        self.dynamic_lut_public_inputs.push(false);
+        self.dynamic_lut_public_input_targets.push(None);
+        self.lut_to_lookups.push(vec![]);
+        self.luts.len() - 1
+    }
+
+    /// Adds a dynamic lookup table whose entries are exposed directly as packed public inputs.
+    pub fn update_dynamic_public_lut(&mut self, table_len: usize) -> usize {
+        assert!(table_len > 0, "dynamic lookup tables cannot be empty");
+        assert!(table_len <= u16::MAX as usize + 1);
+        let placeholder = Arc::new(
+            (0..table_len)
+                .map(|input| (input as u16, input as u16))
+                .collect(),
+        );
+        self.luts.push(placeholder);
+        self.dynamic_luts.push(true);
+        self.dynamic_lut_digests.push(None);
+        self.dynamic_lut_public_inputs.push(true);
+        let public_inputs = (0..table_len)
+            .map(|_| self.add_virtual_public_input())
+            .collect();
+        self.dynamic_lut_public_input_targets
+            .push(Some(public_inputs));
         self.lut_to_lookups.push(vec![]);
         self.luts.len() - 1
     }
