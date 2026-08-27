@@ -100,7 +100,6 @@ pub(crate) fn verify_with_challenges<
     let merkle_caps = &[
         verifier_data.constants_sigmas_cap.clone(),
         proof.wires_cap,
-        // In the lookup case, `plonk_zs_partial_products_cap` should also include the lookup commitment.
         proof.plonk_zs_partial_products_cap,
         proof.quotient_polys_cap,
     ];

@@ -44,6 +44,7 @@ pub struct LookupTableGate {
     lut_hash: [u8; 32],
     /// First row of the lookup table.
     last_lut_row: usize,
+    dynamic: bool,
 }
 
 impl LookupTableGate {
@@ -58,7 +59,14 @@ impl LookupTableGate {
             lut,
             lut_hash: keccak(table_bytes).0,
             last_lut_row,
+            dynamic: false,
         }
+    }
+
+    pub fn new_dynamic(config: &CircuitConfig, lut: LookupTable, last_lut_row: usize) -> Self {
+        let mut gate = Self::new_from_table(config, lut, last_lut_row);
+        gate.dynamic = true;
+        gate
     }
 
     pub(crate) const fn num_slots(config: &CircuitConfig) -> usize {
@@ -86,14 +94,15 @@ impl<F: RichField + Extendable<D>, const D: usize> Gate<F, D> for LookupTableGat
     fn id(&self) -> String {
         // Custom implementation to not have the entire lookup table
         format!(
-            "LookupTableGate {{num_slots: {}, lut_hash: {:?}, last_lut_row: {}}}",
-            self.num_slots, self.lut_hash, self.last_lut_row
+            "LookupTableGate {{num_slots: {}, lut_hash: {:?}, last_lut_row: {}, dynamic: {}}}",
+            self.num_slots, self.lut_hash, self.last_lut_row, self.dynamic
         )
     }
 
     fn serialize(&self, dst: &mut Vec<u8>, common_data: &CommonCircuitData<F, D>) -> IoResult<()> {
         dst.write_usize(self.num_slots)?;
         dst.write_usize(self.last_lut_row)?;
+        dst.write_bool(self.dynamic)?;
         for (i, lut) in common_data.luts.iter().enumerate() {
             if lut == &self.lut {
                 dst.write_usize(i)?;
@@ -107,6 +116,7 @@ impl<F: RichField + Extendable<D>, const D: usize> Gate<F, D> for LookupTableGat
     fn deserialize(src: &mut Buffer, common_data: &CommonCircuitData<F, D>) -> IoResult<Self> {
         let num_slots = src.read_usize()?;
         let last_lut_row = src.read_usize()?;
+        let dynamic = src.read_bool()?;
         let lut_index = src.read_usize()?;
         let mut lut_hash = [0u8; 32];
         src.read_exact(&mut lut_hash)?;
@@ -116,6 +126,7 @@ impl<F: RichField + Extendable<D>, const D: usize> Gate<F, D> for LookupTableGat
             lut: common_data.luts[lut_index].clone(),
             lut_hash,
             last_lut_row,
+            dynamic,
         })
     }
 
@@ -155,6 +166,7 @@ impl<F: RichField + Extendable<D>, const D: usize> Gate<F, D> for LookupTableGat
                         slot_nb: i,
                         num_slots: self.num_slots,
                         last_lut_row: self.last_lut_row,
+                        dynamic: self.dynamic,
                     }
                     .adapter(),
                 )
@@ -195,6 +207,7 @@ pub struct LookupTableGenerator {
     slot_nb: usize,
     num_slots: usize,
     last_lut_row: usize,
+    dynamic: bool,
 }
 
 impl<F: RichField + Extendable<D>, const D: usize> SimpleGenerator<F, D> for LookupTableGenerator {
@@ -211,6 +224,10 @@ impl<F: RichField + Extendable<D>, const D: usize> SimpleGenerator<F, D> for Loo
         _witness: &PartitionWitness<F>,
         out_buffer: &mut GeneratedValues<F>,
     ) -> Result<()> {
+        if self.dynamic {
+            return Ok(());
+        }
+
         let first_row = self.last_lut_row + self.lut.len().div_ceil(self.num_slots) - 1;
         let slot = (first_row - self.row) * self.num_slots + self.slot_nb;
 
@@ -237,6 +254,7 @@ impl<F: RichField + Extendable<D>, const D: usize> SimpleGenerator<F, D> for Loo
         dst.write_usize(self.slot_nb)?;
         dst.write_usize(self.num_slots)?;
         dst.write_usize(self.last_lut_row)?;
+        dst.write_bool(self.dynamic)?;
         for (i, lut) in common_data.luts.iter().enumerate() {
             if lut == &self.lut {
                 return dst.write_usize(i);
@@ -251,6 +269,7 @@ impl<F: RichField + Extendable<D>, const D: usize> SimpleGenerator<F, D> for Loo
         let slot_nb = src.read_usize()?;
         let num_slots = src.read_usize()?;
         let last_lut_row = src.read_usize()?;
+        let dynamic = src.read_bool()?;
         let lut_index = src.read_usize()?;
 
         Ok(Self {
@@ -259,6 +278,7 @@ impl<F: RichField + Extendable<D>, const D: usize> SimpleGenerator<F, D> for Loo
             slot_nb,
             num_slots,
             last_lut_row,
+            dynamic,
         })
     }
 }

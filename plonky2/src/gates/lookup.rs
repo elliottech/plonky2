@@ -40,6 +40,7 @@ pub struct LookupGate {
     lut: LookupTable,
     /// The Keccak hash of the lookup table.
     lut_hash: [u8; 32],
+    dynamic: bool,
 }
 
 impl LookupGate {
@@ -53,7 +54,14 @@ impl LookupGate {
             num_slots: Self::num_slots(config),
             lut,
             lut_hash: keccak(table_bytes).0,
+            dynamic: false,
         }
+    }
+
+    pub fn new_dynamic(config: &CircuitConfig, lut: LookupTable) -> Self {
+        let mut gate = Self::new_from_table(config, lut);
+        gate.dynamic = true;
+        gate
     }
     pub(crate) const fn num_slots(config: &CircuitConfig) -> usize {
         let wires_per_lookup = 2;
@@ -73,13 +81,14 @@ impl<F: RichField + Extendable<D>, const D: usize> Gate<F, D> for LookupGate {
     fn id(&self) -> String {
         // Custom implementation to not have the entire lookup table
         format!(
-            "LookupGate {{num_slots: {}, lut_hash: {:?}}}",
-            self.num_slots, self.lut_hash
+            "LookupGate {{num_slots: {}, lut_hash: {:?}, dynamic: {}}}",
+            self.num_slots, self.lut_hash, self.dynamic
         )
     }
 
     fn serialize(&self, dst: &mut Vec<u8>, common_data: &CommonCircuitData<F, D>) -> IoResult<()> {
         dst.write_usize(self.num_slots)?;
+        dst.write_bool(self.dynamic)?;
         for (i, lut) in common_data.luts.iter().enumerate() {
             if lut == &self.lut {
                 dst.write_usize(i)?;
@@ -92,6 +101,7 @@ impl<F: RichField + Extendable<D>, const D: usize> Gate<F, D> for LookupGate {
 
     fn deserialize(src: &mut Buffer, common_data: &CommonCircuitData<F, D>) -> IoResult<Self> {
         let num_slots = src.read_usize()?;
+        let dynamic = src.read_bool()?;
         let lut_index = src.read_usize()?;
         let mut lut_hash = [0u8; 32];
         src.read_exact(&mut lut_hash)?;
@@ -100,6 +110,7 @@ impl<F: RichField + Extendable<D>, const D: usize> Gate<F, D> for LookupGate {
             num_slots,
             lut: common_data.luts[lut_index].clone(),
             lut_hash,
+            dynamic,
         })
     }
 
@@ -137,6 +148,7 @@ impl<F: RichField + Extendable<D>, const D: usize> Gate<F, D> for LookupGate {
                         row,
                         lut: self.lut.clone(),
                         slot_nb: i,
+                        dynamic: self.dynamic,
                     }
                     .adapter(),
                 )
@@ -175,6 +187,7 @@ pub struct LookupGenerator {
     row: usize,
     lut: LookupTable,
     slot_nb: usize,
+    dynamic: bool,
 }
 
 impl<F: RichField + Extendable<D>, const D: usize> SimpleGenerator<F, D> for LookupGenerator {
@@ -194,6 +207,10 @@ impl<F: RichField + Extendable<D>, const D: usize> SimpleGenerator<F, D> for Loo
         witness: &PartitionWitness<F>,
         out_buffer: &mut GeneratedValues<F>,
     ) -> Result<()> {
+        if self.dynamic {
+            return Ok(());
+        }
+
         let get_wire = |wire: usize| -> F { witness.get_target(Target::wire(self.row, wire)) };
 
         let input_val = get_wire(LookupGate::wire_ith_looking_inp(self.slot_nb));
@@ -224,6 +241,7 @@ impl<F: RichField + Extendable<D>, const D: usize> SimpleGenerator<F, D> for Loo
     fn serialize(&self, dst: &mut Vec<u8>, common_data: &CommonCircuitData<F, D>) -> IoResult<()> {
         dst.write_usize(self.row)?;
         dst.write_usize(self.slot_nb)?;
+        dst.write_bool(self.dynamic)?;
         for (i, lut) in common_data.luts.iter().enumerate() {
             if lut == &self.lut {
                 return dst.write_usize(i);
@@ -236,12 +254,14 @@ impl<F: RichField + Extendable<D>, const D: usize> SimpleGenerator<F, D> for Loo
     fn deserialize(src: &mut Buffer, common_data: &CommonCircuitData<F, D>) -> IoResult<Self> {
         let row = src.read_usize()?;
         let slot_nb = src.read_usize()?;
+        let dynamic = src.read_bool()?;
         let lut_index = src.read_usize()?;
 
         Ok(Self {
             row,
             lut: common_data.luts[lut_index].clone(),
             slot_nb,
+            dynamic,
         })
     }
 }

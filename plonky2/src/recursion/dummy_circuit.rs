@@ -243,6 +243,7 @@ where
                 num_lookup_polys: 0,
                 num_lookup_selectors: 0,
                 luts: vec![],
+                dynamic_luts: vec![],
             },
             verifier_only: VerifierOnlyCircuitData {
                 constants_sigmas_cap: MerkleCap(vec![]),

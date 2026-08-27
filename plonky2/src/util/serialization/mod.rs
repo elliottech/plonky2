@@ -774,6 +774,10 @@ pub trait Read {
         for _ in 0..length {
             luts.push(Arc::new(self.read_lut()?));
         }
+        let dynamic_luts_len = self.read_usize()?;
+        let dynamic_luts = (0..dynamic_luts_len)
+            .map(|_| self.read_bool())
+            .collect::<IoResult<Vec<_>>>()?;
 
         let gates_len = self.read_usize()?;
         let mut gates = Vec::with_capacity(gates_len);
@@ -794,6 +798,7 @@ pub trait Read {
             num_lookup_polys,
             num_lookup_selectors,
             luts,
+            dynamic_luts,
         };
 
         for _ in 0..gates_len {
@@ -1785,6 +1790,7 @@ pub trait Write {
             num_lookup_polys,
             num_lookup_selectors,
             luts,
+            dynamic_luts,
         } = common_data;
 
         self.write_circuit_config(config)?;
@@ -1806,6 +1812,10 @@ pub trait Write {
         self.write_usize(luts.len())?;
         for lut in luts.iter() {
             self.write_lut(lut)?;
+        }
+        self.write_usize(dynamic_luts.len())?;
+        for &dynamic in dynamic_luts {
+            self.write_bool(dynamic)?;
         }
 
         self.write_usize(gates.len())?;

@@ -195,6 +195,16 @@ pub struct CircuitBuilder<F: RichField + Extendable<D>, const D: usize> {
 
     // Lookup tables in the form of `Vec<(input_value, output_value)>`.
     luts: Vec<LookupTable>,
+    /// Whether each LUT is supplied at proving time instead of fixed in `CommonCircuitData`.
+    pub(crate) dynamic_luts: Vec<bool>,
+    /// Public Poseidon digest target for each dynamic LUT; static LUTs have no digest target.
+    pub(crate) dynamic_lut_digests: Vec<Option<HashOutTarget>>,
+    /// Internal hash of each dynamic LUT's output column.
+    pub(crate) dynamic_lut_outputs_hashes: Vec<Option<HashOutTarget>>,
+    /// Whether a dynamic LUT's input column is constrained to `0..len`.
+    pub(crate) indexed_dynamic_luts: Vec<bool>,
+    /// Packed public-input targets for dynamic LUT entries, when requested.
+    pub(crate) dynamic_lut_public_input_targets: Vec<Option<Vec<Target>>>,
 
     /// Optional common data. When it is `Some(goal_data)`, the `build` function panics if the resulting
     /// common data doesn't equal `goal_data`.
@@ -232,6 +242,11 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
             lookup_rows: Vec::new(),
             lut_to_lookups: Vec::new(),
             luts: Vec::new(),
+            dynamic_luts: Vec::new(),
+            dynamic_lut_digests: Vec::new(),
+            dynamic_lut_outputs_hashes: Vec::new(),
+            indexed_dynamic_luts: Vec::new(),
+            dynamic_lut_public_input_targets: Vec::new(),
             goal_common_data: None,
             verifier_data_public_input: None,
         };
@@ -739,6 +754,29 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
         self.luts.iter().position(|elt| *elt == lut)
     }
 
+    fn is_static_lut_stored(&self, lut: &LookupTable) -> Option<usize> {
+        self.luts
+            .iter()
+            .zip(&self.dynamic_luts)
+            .position(|(stored, &dynamic)| !dynamic && stored == lut)
+    }
+
+    fn store_static_lut(&mut self, lut: LookupTable) -> usize {
+        if let Some(index) = self.is_static_lut_stored(&lut) {
+            return index;
+        }
+
+        self.luts.push(lut);
+        self.dynamic_luts.push(false);
+        self.dynamic_lut_digests.push(None);
+        self.dynamic_lut_outputs_hashes.push(None);
+        self.indexed_dynamic_luts.push(false);
+        self.dynamic_lut_public_input_targets.push(None);
+        self.lut_to_lookups.push(vec![]);
+        debug_assert_eq!(self.luts.len(), self.lut_to_lookups.len());
+        self.luts.len() - 1
+    }
+
     /// Returns the LUT at index `idx`.
     pub fn get_lut(&self, idx: usize) -> LookupTable {
         assert!(
@@ -761,16 +799,7 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
     /// Given a function `f: fn(u16) -> u16`, adds a LUT to the circuit builder.
     pub fn update_luts_from_fn(&mut self, f: fn(u16) -> u16, inputs: &[u16]) -> usize {
         let lut = Arc::new(Self::get_lut_from_fn::<u16>(f, inputs));
-
-        // If the LUT `lut` is already stored in `self.luts`, return its index. Otherwise, append `table` to `self.luts` and return its index.
-        if let Some(idx) = self.is_stored(lut.clone()) {
-            idx
-        } else {
-            self.luts.push(lut);
-            self.lut_to_lookups.push(vec![]);
-            assert!(self.luts.len() == self.lut_to_lookups.len());
-            self.luts.len() - 1
-        }
+        self.store_static_lut(lut)
     }
 
     /// Adds a table to the vector of LUTs in the circuit builder, given a list of inputs and table values.
@@ -787,29 +816,64 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
             .zip_eq(table.iter().copied())
             .collect();
         let lut: LookupTable = Arc::new(pairs);
-
-        // If the LUT `lut` is already stored in `self.luts`, return its index. Otherwise, append `table` to `self.luts` and return its index.
-        if let Some(idx) = self.is_stored(lut.clone()) {
-            idx
-        } else {
-            self.luts.push(lut);
-            self.lut_to_lookups.push(vec![]);
-            assert!(self.luts.len() == self.lut_to_lookups.len());
-            self.luts.len() - 1
-        }
+        self.store_static_lut(lut)
     }
 
     /// Adds a table to the vector of LUTs in the circuit builder.
     pub fn update_luts_from_pairs(&mut self, table: LookupTable) -> usize {
-        // If the LUT `table` is already stored in `self.luts`, return its index. Otherwise, append `table` to `self.luts` and return its index.
-        if let Some(idx) = self.is_stored(table.clone()) {
-            idx
-        } else {
-            self.luts.push(table);
-            self.lut_to_lookups.push(vec![]);
-            assert!(self.luts.len() == self.lut_to_lookups.len());
-            self.luts.len() - 1
-        }
+        self.store_static_lut(table)
+    }
+
+    /// Adds a lookup table whose values are supplied to `prove_with_dynamic_lookup_tables`.
+    /// The table length is part of the circuit shape, while its entries are witness data.
+    pub fn update_dynamic_lut(&mut self, table_len: usize) -> usize {
+        assert!(table_len > 0, "dynamic lookup tables cannot be empty");
+        assert!(table_len <= u16::MAX as usize + 1);
+        let placeholder = Arc::new(
+            (0..table_len)
+                .map(|input| (input as u16, input as u16))
+                .collect(),
+        );
+        self.luts.push(placeholder);
+        self.dynamic_luts.push(true);
+        let digest = self.add_virtual_hash_public_input();
+        let outputs_hash = self.add_virtual_hash();
+        self.dynamic_lut_digests.push(Some(digest));
+        self.dynamic_lut_outputs_hashes.push(Some(outputs_hash));
+        self.indexed_dynamic_luts.push(false);
+        self.dynamic_lut_public_input_targets.push(None);
+        self.lut_to_lookups.push(vec![]);
+        self.luts.len() - 1
+    }
+
+    /// Adds a dynamic lookup table whose input column is fixed to `0..table_len`.
+    pub fn update_indexed_dynamic_lut(&mut self, table_len: usize) -> usize {
+        let lut_index = self.update_dynamic_lut(table_len);
+        self.indexed_dynamic_luts[lut_index] = true;
+        lut_index
+    }
+
+    /// Adds a dynamic lookup table whose entries are exposed directly as packed public inputs.
+    pub fn update_dynamic_public_lut(&mut self, table_len: usize) -> usize {
+        assert!(table_len > 0, "dynamic lookup tables cannot be empty");
+        assert!(table_len <= u16::MAX as usize + 1);
+        let placeholder = Arc::new(
+            (0..table_len)
+                .map(|input| (input as u16, input as u16))
+                .collect(),
+        );
+        self.luts.push(placeholder);
+        self.dynamic_luts.push(true);
+        self.dynamic_lut_digests.push(None);
+        self.dynamic_lut_outputs_hashes.push(None);
+        self.indexed_dynamic_luts.push(false);
+        let public_inputs = (0..table_len)
+            .map(|_| self.add_virtual_public_input())
+            .collect();
+        self.dynamic_lut_public_input_targets
+            .push(Some(public_inputs));
+        self.lut_to_lookups.push(vec![]);
+        self.luts.len() - 1
     }
 
     /// Find an available slot, of the form `(row, op)` for gate `G` using parameters `params`
@@ -1144,7 +1208,7 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
         self.randomize_unused_pi_wires(pi_gate);
 
         // Place LUT-related gates.
-        self.add_all_lookups();
+        self.add_all_lookups::<C::InnerHasher>();
 
         // Make sure we have enough constant generators. If not, add a `ConstantGate`.
         while self.constants_to_targets.len() > self.constant_generators.len() {
@@ -1299,13 +1363,15 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
         let domain_separator = self.domain_separator.unwrap_or_default();
         let domain_separator_digest = C::Hasher::hash_pad(&domain_separator);
         // TODO: This should also include an encoding of gate constraints.
+        let mut circuit_metadata = vec![
+            F::from_canonical_usize(degree_bits),
+            F::from_canonical_usize(self.dynamic_luts.len()),
+        ];
+        circuit_metadata.extend(self.dynamic_luts.iter().copied().map(F::from_bool));
         let circuit_digest_parts = [
             constants_sigmas_cap.flatten(),
             domain_separator_digest.to_vec(),
-            vec![
-                F::from_canonical_usize(degree_bits),
-                /* Add other circuit data here */
-            ],
+            circuit_metadata,
         ];
         let circuit_digest = C::Hasher::hash_no_pad(&circuit_digest_parts.concat());
 
@@ -1323,6 +1389,7 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
             num_lookup_polys,
             num_lookup_selectors,
             luts: self.luts,
+            dynamic_luts: self.dynamic_luts,
         };
 
         let mut success = true;

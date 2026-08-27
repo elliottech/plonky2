@@ -46,7 +46,7 @@ use crate::plonk::circuit_builder::CircuitBuilder;
 use crate::plonk::config::{GenericConfig, Hasher};
 use crate::plonk::plonk_common::PlonkOracle;
 use crate::plonk::proof::{CompressedProofWithPublicInputs, ProofWithPublicInputs};
-use crate::plonk::prover::prove;
+use crate::plonk::prover::{prove, prove_with_dynamic_lookup_tables};
 use crate::plonk::verifier::verify;
 use crate::util::serialization::{
     Buffer, GateSerializer, IoResult, Read, WitnessGeneratorSerializer, Write,
@@ -221,6 +221,22 @@ impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>
         )
     }
 
+    /// Proves a circuit with runtime lookup tables. Each supplied table must match the
+    /// circuit-fixed length; static tables cannot be overridden.
+    pub fn prove_with_dynamic_lookup_tables(
+        &self,
+        inputs: PartialWitness<F>,
+        lookup_tables: &[LookupTable],
+    ) -> Result<ProofWithPublicInputs<F, C, D>> {
+        prove_with_dynamic_lookup_tables::<F, C, D>(
+            &self.prover_only,
+            &self.common,
+            inputs,
+            lookup_tables,
+            &mut TimingTree::default(),
+        )
+    }
+
     pub fn verify(&self, proof_with_pis: ProofWithPublicInputs<F, C, D>) -> Result<()> {
         verify::<F, C, D>(proof_with_pis, &self.verifier_only, &self.common)
     }
@@ -315,6 +331,22 @@ impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>
             &self.prover_only,
             &self.common,
             inputs,
+            &mut TimingTree::default(),
+        )
+    }
+
+    /// Proves a circuit with runtime lookup tables. Each supplied table must match the
+    /// circuit-fixed length; static tables cannot be overridden.
+    pub fn prove_with_dynamic_lookup_tables(
+        &self,
+        inputs: PartialWitness<F>,
+        lookup_tables: &[LookupTable],
+    ) -> Result<ProofWithPublicInputs<F, C, D>> {
+        prove_with_dynamic_lookup_tables::<F, C, D>(
+            &self.prover_only,
+            &self.common,
+            inputs,
+            lookup_tables,
             &mut TimingTree::default(),
         )
     }
@@ -477,6 +509,8 @@ pub struct CommonCircuitData<F: RichField + Extendable<D>, const D: usize> {
 
     /// The stored lookup tables.
     pub luts: Vec<LookupTable>,
+    /// Per-table marker for tables whose entries are provided as witness data at proving time.
+    pub dynamic_luts: Vec<bool>,
 }
 
 impl<F: RichField + Extendable<D>, const D: usize> CommonCircuitData<F, D> {
