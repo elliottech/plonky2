@@ -1,5 +1,5 @@
 #[cfg(not(feature = "std"))]
-use alloc::{borrow::ToOwned, vec};
+use alloc::{borrow::ToOwned, vec, vec::Vec};
 
 use crate::field::extension::Extendable;
 use crate::gates::lookup::LookupGate;
@@ -11,6 +11,7 @@ use crate::plonk::circuit_builder::CircuitBuilder;
 use crate::plonk::config::{AlgebraicHasher, Hasher};
 
 const DYNAMIC_LOOKUP_TABLE_DOMAIN_SEPARATOR: u64 = 0x4459_4e4c_5554;
+const DYNAMIC_LOOKUP_TABLE_OUTPUTS_DOMAIN_SEPARATOR: u64 = 0x4459_4e4f_5554;
 
 /// Computes the public digest used to bind a dynamic lookup table to a proof.
 /// Use the circuit configuration's `InnerHasher` so this matches the in-circuit hash.
@@ -23,10 +24,24 @@ pub fn hash_dynamic_lookup_table<F: RichField, H: Hasher<F, Hash = HashOut<F>>>(
         F::from_canonical_usize(lut_index),
         F::from_canonical_usize(table.len()),
     ];
+    input.extend(table.iter().map(|&(x, _)| F::from_canonical_u16(x)));
+    input.extend(hash_dynamic_lookup_table_outputs::<F, H>(table).elements);
+    H::hash_no_pad(&input)
+}
+
+/// Hashes only the output column of a dynamic lookup table.
+pub fn hash_dynamic_lookup_table_outputs<F: RichField, H: Hasher<F, Hash = HashOut<F>>>(
+    table: &LookupTable,
+) -> HashOut<F> {
+    let mut input = Vec::with_capacity(table.len() + 2);
+    input.push(F::from_canonical_u64(
+        DYNAMIC_LOOKUP_TABLE_OUTPUTS_DOMAIN_SEPARATOR,
+    ));
+    input.push(F::from_canonical_usize(table.len()));
     input.extend(
         table
             .iter()
-            .flat_map(|&(x, y)| [F::from_canonical_u16(x), F::from_canonical_u16(y)]),
+            .map(|&(_, output)| F::from_canonical_u16(output)),
     );
     H::hash_no_pad(&input)
 }
@@ -76,6 +91,11 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
         self.update_dynamic_lut(table_len)
     }
 
+    /// Registers a dynamic table with inputs constrained to `0..table_len`.
+    pub fn add_indexed_dynamic_lookup_table(&mut self, table_len: usize) -> usize {
+        self.update_indexed_dynamic_lut(table_len)
+    }
+
     /// Registers a dynamic table and exposes each `(u16, u16)` entry as one packed public input.
     pub fn add_dynamic_lookup_table_public_inputs(&mut self, table_len: usize) -> usize {
         self.update_dynamic_public_lut(table_len)
@@ -84,6 +104,11 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
     /// Returns the public input target containing the digest of a dynamic lookup table.
     pub fn dynamic_lookup_table_digest(&self, lut_index: usize) -> HashOutTarget {
         self.dynamic_lut_digests[lut_index].expect("lookup table is not dynamic")
+    }
+
+    /// Returns the internal hash of a dynamic lookup table's output column.
+    pub fn dynamic_lookup_table_outputs_hash(&self, lut_index: usize) -> HashOutTarget {
+        self.dynamic_lut_outputs_hashes[lut_index].expect("lookup table is not digest-backed")
     }
 
     /// Registers a lookup request against a dynamic table. The caller supplies/constrains both
@@ -214,6 +239,13 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
                 }
 
                 if let Some(expected_digest) = self.dynamic_lut_digests[lut_index] {
+                    let expected_outputs_hash = self.dynamic_lut_outputs_hashes[lut_index]
+                        .expect("digest-backed lookup table has no outputs hash");
+                    let mut outputs = Vec::with_capacity(lut.len() + 2);
+                    outputs.push(self.constant(F::from_canonical_u64(
+                        DYNAMIC_LOOKUP_TABLE_OUTPUTS_DOMAIN_SEPARATOR,
+                    )));
+                    outputs.push(self.constant(F::from_canonical_usize(lut.len())));
                     let mut hash_input = vec![
                         self.constant(F::from_canonical_u64(DYNAMIC_LOOKUP_TABLE_DOMAIN_SEPARATOR)),
                         self.constant(F::from_canonical_usize(lut_index)),
@@ -222,15 +254,18 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
                     for lut_entry in 0..lut.len() {
                         let row = first_lut_gate - lut_entry / num_lut_entries;
                         let slot = lut_entry % num_lut_entries;
-                        hash_input.push(Target::wire(
-                            row,
-                            LookupTableGate::wire_ith_looked_inp(slot),
-                        ));
-                        hash_input.push(Target::wire(
-                            row,
-                            LookupTableGate::wire_ith_looked_out(slot),
-                        ));
+                        let input = Target::wire(row, LookupTableGate::wire_ith_looked_inp(slot));
+                        let output = Target::wire(row, LookupTableGate::wire_ith_looked_out(slot));
+                        if self.indexed_dynamic_luts[lut_index] {
+                            let expected_input = self.constant(F::from_canonical_usize(lut_entry));
+                            self.connect(input, expected_input);
+                        }
+                        hash_input.push(input);
+                        outputs.push(output);
                     }
+                    let actual_outputs_hash = self.hash_n_to_hash_no_pad::<H>(outputs);
+                    self.connect_hashes(actual_outputs_hash, expected_outputs_hash);
+                    hash_input.extend(expected_outputs_hash.elements);
                     let actual_digest = self.hash_n_to_hash_no_pad::<H>(hash_input);
                     self.connect_hashes(actual_digest, expected_digest);
                 }

@@ -199,6 +199,10 @@ pub struct CircuitBuilder<F: RichField + Extendable<D>, const D: usize> {
     pub(crate) dynamic_luts: Vec<bool>,
     /// Public Poseidon digest target for each dynamic LUT; static LUTs have no digest target.
     pub(crate) dynamic_lut_digests: Vec<Option<HashOutTarget>>,
+    /// Internal hash of each dynamic LUT's output column.
+    pub(crate) dynamic_lut_outputs_hashes: Vec<Option<HashOutTarget>>,
+    /// Whether a dynamic LUT's input column is constrained to `0..len`.
+    pub(crate) indexed_dynamic_luts: Vec<bool>,
     /// Packed public-input targets for dynamic LUT entries, when requested.
     pub(crate) dynamic_lut_public_input_targets: Vec<Option<Vec<Target>>>,
 
@@ -240,6 +244,8 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
             luts: Vec::new(),
             dynamic_luts: Vec::new(),
             dynamic_lut_digests: Vec::new(),
+            dynamic_lut_outputs_hashes: Vec::new(),
+            indexed_dynamic_luts: Vec::new(),
             dynamic_lut_public_input_targets: Vec::new(),
             goal_common_data: None,
             verifier_data_public_input: None,
@@ -763,6 +769,8 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
         self.luts.push(lut);
         self.dynamic_luts.push(false);
         self.dynamic_lut_digests.push(None);
+        self.dynamic_lut_outputs_hashes.push(None);
+        self.indexed_dynamic_luts.push(false);
         self.dynamic_lut_public_input_targets.push(None);
         self.lut_to_lookups.push(vec![]);
         debug_assert_eq!(self.luts.len(), self.lut_to_lookups.len());
@@ -829,10 +837,20 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
         self.luts.push(placeholder);
         self.dynamic_luts.push(true);
         let digest = self.add_virtual_hash_public_input();
+        let outputs_hash = self.add_virtual_hash();
         self.dynamic_lut_digests.push(Some(digest));
+        self.dynamic_lut_outputs_hashes.push(Some(outputs_hash));
+        self.indexed_dynamic_luts.push(false);
         self.dynamic_lut_public_input_targets.push(None);
         self.lut_to_lookups.push(vec![]);
         self.luts.len() - 1
+    }
+
+    /// Adds a dynamic lookup table whose input column is fixed to `0..table_len`.
+    pub fn update_indexed_dynamic_lut(&mut self, table_len: usize) -> usize {
+        let lut_index = self.update_dynamic_lut(table_len);
+        self.indexed_dynamic_luts[lut_index] = true;
+        lut_index
     }
 
     /// Adds a dynamic lookup table whose entries are exposed directly as packed public inputs.
@@ -847,6 +865,8 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilder<F, D> {
         self.luts.push(placeholder);
         self.dynamic_luts.push(true);
         self.dynamic_lut_digests.push(None);
+        self.dynamic_lut_outputs_hashes.push(None);
+        self.indexed_dynamic_luts.push(false);
         let public_inputs = (0..table_len)
             .map(|_| self.add_virtual_public_input())
             .collect();
